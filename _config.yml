@@ -1,0 +1,40 @@
+# GitHub Pages Configuration
+# This file configures Jekyll to properly render Mermaid diagrams
+
+# Theme (GitHub Pages default)
+theme: jekyll-theme-cayman
+
+# Markdown processor
+markdown: kramdown
+
+# Kramdown settings
+kramdown:
+  input: GFM  # GitHub Flavored Markdown
+  hard_wrap: false
+  parse_block_html: true  # Required for Mermaid diagrams
+  syntax_highlighter: rouge
+  auto_ids: true  # Enable automatic heading IDs for anchor links
+  toc_levels: 1..6  # Table of contents levels
+
+# Site settings
+title: TIBCO Platform on EKS Workshop
+description: Comprehensive guides for deploying TIBCO Platform on Amazon Elastic Kubernetes Service (EKS)
+repository: tibco-bnl/workshop-tp-eks
+
+# Enable GitHub metadata
+plugins:
+  - jekyll-github-metadata
+
+# Include files
+include:
+  - README.md
+  - howto
+  - scripts
+  - docs
+
+# Exclude files from site generation
+exclude:
+  - .git
+  - .gitignore
+  - "*.yaml"
+  - LICENSE

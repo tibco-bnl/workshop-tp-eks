@@ -1,0 +1,409 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connectivity-test-script
+  namespace: kube-system
+data:
+  test-connectivity.sh: |
+    #!/bin/bash
+
+    # Color codes for output
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m' # No Color
+
+    # Counters
+    CRITICAL_PASS=0
+    CRITICAL_FAIL=0
+    RECOMMENDED_PASS=0
+    RECOMMENDED_FAIL=0
+    OPTIONAL_PASS=0
+    OPTIONAL_FAIL=0
+
+    # Arrays to store failed URLs
+    CRITICAL_FAILED=()
+    RECOMMENDED_FAILED=()
+    OPTIONAL_FAILED=()
+
+    echo "========================================================================="
+    echo "TIBCO Platform Connectivity Test Report"
+    echo "Platform: Amazon Elastic Kubernetes Service (EKS)"
+    echo "Date: $(date)"
+    echo "Hostname: $(hostname)"
+    echo "========================================================================="
+    echo ""
+
+    # Function to test URL connectivity
+    test_url() {
+        local url=$1
+        local category=$2
+        local timeout=10
+
+        if curl -s -o /dev/null -w "%{http_code}" --max-time $timeout --connect-timeout $timeout "$url" > /tmp/http_code 2>/dev/null; then
+            http_code=$(cat /tmp/http_code)
+            # Accept 2xx, 3xx, 4xx as success (connection established)
+            if [[ $http_code -ge 200 ]] && [[ $http_code -lt 500 ]]; then
+                echo -e "${GREEN}✓ PASS${NC} $url (HTTP $http_code)"
+                return 0
+            else
+                echo -e "${RED}✗ FAIL${NC} $url (HTTP $http_code)"
+                return 1
+            fi
+        else
+            echo -e "${RED}✗ FAIL${NC} $url (Connection timeout/failed)"
+            return 1
+        fi
+    }
+
+    echo "========================================================================="
+    echo "SECTION 1: CRITICAL ENDPOINTS (Must be accessible)"
+    echo "========================================================================="
+    echo ""
+
+    echo "--- TIBCO Container Registry (CRITICAL) ---"
+    for url in \
+        "https://csgprduswrepoedge.jfrog.io"
+    do
+        if test_url "$url" "CRITICAL"; then
+            ((CRITICAL_PASS++))
+        else
+            ((CRITICAL_FAIL++))
+            CRITICAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- TIBCO Helm Charts (CRITICAL) ---"
+    for url in \
+        "https://tibcosoftware.github.io/tp-helm-charts" \
+        "https://tibcosoftware.github.io/tp-helm-charts/index.yaml"
+    do
+        if test_url "$url" "CRITICAL"; then
+            ((CRITICAL_PASS++))
+        else
+            ((CRITICAL_FAIL++))
+            CRITICAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- Third-Party Helm Charts (CRITICAL) ---"
+    for url in \
+        "https://charts.jetstack.io/index.yaml" \
+        "https://helm.elastic.co/index.yaml" \
+        "https://kubernetes-sigs.github.io/external-dns/index.yaml" \
+        "https://prometheus-community.github.io/helm-charts/index.yaml" \
+        "https://aws.github.io/eks-charts/index.yaml" \
+        "https://kubernetes-sigs.github.io/metrics-server/index.yaml"
+    do
+        if test_url "$url" "CRITICAL"; then
+            ((CRITICAL_PASS++))
+        else
+            ((CRITICAL_FAIL++))
+            CRITICAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- Container Registries (CRITICAL) ---"
+    for url in \
+        "https://docker.io" \
+        "https://index.docker.io" \
+        "https://ghcr.io" \
+        "https://quay.io"
+    do
+        if test_url "$url" "CRITICAL"; then
+            ((CRITICAL_PASS++))
+        else
+            ((CRITICAL_FAIL++))
+            CRITICAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- AWS Services (CRITICAL) ---"
+    for url in \
+        "https://sts.amazonaws.com" \
+        "https://iam.amazonaws.com" \
+        "https://ec2.amazonaws.com" \
+        "https://elasticloadbalancing.amazonaws.com" \
+        "https://public.ecr.aws"
+    do
+        if test_url "$url" "CRITICAL"; then
+            ((CRITICAL_PASS++))
+        else
+            ((CRITICAL_FAIL++))
+            CRITICAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- Go Module Proxy (CRITICAL for Flogo) ---"
+    for url in \
+        "https://proxy.golang.org" \
+        "https://sum.golang.org"
+    do
+        if test_url "$url" "CRITICAL"; then
+            ((CRITICAL_PASS++))
+        else
+            ((CRITICAL_FAIL++))
+            CRITICAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "========================================================================="
+    echo "SECTION 2: RECOMMENDED ENDPOINTS (Highly recommended)"
+    echo "========================================================================="
+    echo ""
+
+    echo "--- AWS Services (RECOMMENDED) ---"
+    for url in \
+        "https://s3.amazonaws.com" \
+        "https://autoscaling.amazonaws.com"
+    do
+        if test_url "$url" "RECOMMENDED"; then
+            ((RECOMMENDED_PASS++))
+        else
+            ((RECOMMENDED_FAIL++))
+            RECOMMENDED_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- Kubernetes and GitHub (RECOMMENDED) ---"
+    for url in \
+        "https://k8s.io" \
+        "https://kubernetes.io" \
+        "https://github.com" \
+        "https://raw.githubusercontent.com"
+    do
+        if test_url "$url" "RECOMMENDED"; then
+            ((RECOMMENDED_PASS++))
+        else
+            ((RECOMMENDED_FAIL++))
+            RECOMMENDED_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "--- EC2 Metadata (RECOMMENDED) ---"
+    for url in \
+        "http://169.254.169.254/latest/meta-data/"
+    do
+        if test_url "$url" "RECOMMENDED"; then
+            ((RECOMMENDED_PASS++))
+        else
+            ((RECOMMENDED_FAIL++))
+            RECOMMENDED_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "========================================================================="
+    echo "SECTION 3: OPTIONAL ENDPOINTS (For documentation and troubleshooting)"
+    echo "========================================================================="
+    echo ""
+
+    echo "--- Documentation Sites (OPTIONAL) ---"
+    for url in \
+        "https://docs.tibco.com" \
+        "https://prometheus.io" \
+        "https://opentelemetry.io" \
+        "https://elastic.co" \
+        "https://grafana.com" \
+        "https://eksctl.io"
+    do
+        if test_url "$url" "OPTIONAL"; then
+            ((OPTIONAL_PASS++))
+        else
+            ((OPTIONAL_FAIL++))
+            OPTIONAL_FAILED+=("$url")
+        fi
+    done
+    echo ""
+
+    echo "========================================================================="
+    echo "CONNECTIVITY TEST SUMMARY"
+    echo "========================================================================="
+    echo ""
+
+    TOTAL_CRITICAL=$((CRITICAL_PASS + CRITICAL_FAIL))
+    TOTAL_RECOMMENDED=$((RECOMMENDED_PASS + RECOMMENDED_FAIL))
+    TOTAL_OPTIONAL=$((OPTIONAL_PASS + OPTIONAL_FAIL))
+    TOTAL_TESTS=$((TOTAL_CRITICAL + TOTAL_RECOMMENDED + TOTAL_OPTIONAL))
+    TOTAL_PASS=$((CRITICAL_PASS + RECOMMENDED_PASS + OPTIONAL_PASS))
+    TOTAL_FAIL=$((CRITICAL_FAIL + RECOMMENDED_FAIL + OPTIONAL_FAIL))
+
+    echo "CRITICAL Endpoints:"
+    echo "  Total: $TOTAL_CRITICAL"
+    echo -e "  ${GREEN}Passed: $CRITICAL_PASS${NC}"
+    echo -e "  ${RED}Failed: $CRITICAL_FAIL${NC}"
+    echo ""
+
+    echo "RECOMMENDED Endpoints:"
+    echo "  Total: $TOTAL_RECOMMENDED"
+    echo -e "  ${GREEN}Passed: $RECOMMENDED_PASS${NC}"
+    echo -e "  ${YELLOW}Failed: $RECOMMENDED_FAIL${NC}"
+    echo ""
+
+    echo "OPTIONAL Endpoints:"
+    echo "  Total: $TOTAL_OPTIONAL"
+    echo -e "  ${GREEN}Passed: $OPTIONAL_PASS${NC}"
+    echo -e "  ${YELLOW}Failed: $OPTIONAL_FAIL${NC}"
+    echo ""
+
+    echo "========================================================================="
+    echo "OVERALL STATISTICS"
+    echo "========================================================================="
+    echo "Total Tests: $TOTAL_TESTS"
+    echo -e "${GREEN}Total Passed: $TOTAL_PASS${NC}"
+    echo -e "${RED}Total Failed: $TOTAL_FAIL${NC}"
+    PASS_RATE=$(awk "BEGIN {printf \"%.2f\", ($TOTAL_PASS/$TOTAL_TESTS)*100}")
+    echo "Pass Rate: ${PASS_RATE}%"
+    echo ""
+
+    # Show failed endpoints by category
+    if [ ${#CRITICAL_FAILED[@]} -gt 0 ]; then
+        echo "========================================================================="
+        echo -e "${RED}CRITICAL FAILURES (IMMEDIATE ACTION REQUIRED)${NC}"
+        echo "========================================================================="
+        for url in "${CRITICAL_FAILED[@]}"; do
+            echo -e "  ${RED}✗${NC} $url"
+        done
+        echo ""
+    fi
+
+    if [ ${#RECOMMENDED_FAILED[@]} -gt 0 ]; then
+        echo "========================================================================="
+        echo -e "${YELLOW}RECOMMENDED FAILURES (Should be addressed)${NC}"
+        echo "========================================================================="
+        for url in "${RECOMMENDED_FAILED[@]}"; do
+            echo -e "  ${YELLOW}⚠${NC} $url"
+        done
+        echo ""
+    fi
+
+    if [ ${#OPTIONAL_FAILED[@]} -gt 0 ]; then
+        echo "========================================================================="
+        echo -e "${BLUE}OPTIONAL FAILURES (May impact troubleshooting)${NC}"
+        echo "========================================================================="
+        for url in "${OPTIONAL_FAILED[@]}"; do
+            echo -e "  ${BLUE}ℹ${NC} $url"
+        done
+        echo ""
+    fi
+
+    # Recommendations
+    echo "========================================================================="
+    echo "RECOMMENDATIONS"
+    echo "========================================================================="
+
+    if [ $CRITICAL_FAIL -eq 0 ]; then
+        echo -e "${GREEN}✓${NC} All CRITICAL endpoints are accessible"
+    else
+        echo -e "${RED}✗${NC} $CRITICAL_FAIL CRITICAL endpoint(s) failed - TIBCO Platform deployment may fail"
+        echo "  Action: Contact your network/security team to open the required firewall rules"
+        echo "  Refer to: docs/firewall-requirements-eks.md"
+    fi
+
+    if [ $RECOMMENDED_FAIL -eq 0 ]; then
+        echo -e "${GREEN}✓${NC} All RECOMMENDED endpoints are accessible"
+    else
+        echo -e "${YELLOW}⚠${NC} $RECOMMENDED_FAIL RECOMMENDED endpoint(s) failed - Some features may not work correctly"
+        echo "  Action: Review firewall rules for RECOMMENDED endpoints"
+    fi
+
+    if [ $OPTIONAL_FAIL -gt 0 ]; then
+        echo -e "${BLUE}ℹ${NC} $OPTIONAL_FAIL OPTIONAL endpoint(s) failed - Documentation access may be limited"
+    fi
+
+    echo ""
+    echo "========================================================================="
+    echo "NEXT STEPS"
+    echo "========================================================================="
+
+    if [ $CRITICAL_FAIL -gt 0 ]; then
+        echo "1. URGENT: Open firewall / security group rules for CRITICAL endpoints"
+        echo "2. Refer to: docs/firewall-requirements-eks.md for complete firewall rules"
+        echo "3. For AWS: Use security groups, NACLs, or AWS Network Firewall"
+        echo "4. For Flogo: Ensure access to proxy.golang.org (or use Flogo CLI to bundle dependencies)"
+        echo "5. Re-run this test: kubectl delete job tibco-connectivity-test -n kube-system && kubectl apply -f scripts/connectivity-test-job.yaml"
+    elif [ $RECOMMENDED_FAIL -gt 0 ]; then
+        echo "1. Review and open firewall rules for RECOMMENDED endpoints"
+        echo "2. Deployment can proceed but some features may be unavailable"
+        echo "3. Consider configuring VPC endpoints for AWS services to reduce internet egress"
+    else
+        echo "1. ✓ All required connectivity checks passed"
+        echo "2. Proceed with TIBCO Platform deployment"
+        echo "3. See: howto/how-to-cp-and-dp-eks-setup-guide.md to begin deployment"
+    fi
+
+    echo ""
+    echo "========================================================================="
+    echo "Test completed at: $(date)"
+    echo "========================================================================="
+
+    # Exit with appropriate code
+    if [ $CRITICAL_FAIL -gt 0 ]; then
+        echo ""
+        echo -e "${RED}EXITING WITH ERROR CODE 1 - CRITICAL ENDPOINTS FAILED${NC}"
+        exit 1
+    elif [ $RECOMMENDED_FAIL -gt 0 ]; then
+        echo ""
+        echo -e "${YELLOW}EXITING WITH WARNING CODE 2 - RECOMMENDED ENDPOINTS FAILED${NC}"
+        exit 2
+    else
+        echo ""
+        echo -e "${GREEN}EXITING WITH SUCCESS CODE 0 - ALL CHECKS PASSED${NC}"
+        exit 0
+    fi
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tibco-connectivity-test
+  namespace: kube-system
+  labels:
+    app: tibco-connectivity-test
+    component: network-validation
+    platform: eks
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400  # Keep for 24 hours after completion
+  template:
+    metadata:
+      labels:
+        app: tibco-connectivity-test
+        component: network-validation
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: connectivity-tester
+        image: curlimages/curl:latest
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            apk add --no-cache bash 2>/dev/null || true
+            bash /scripts/test-connectivity.sh
+        volumeMounts:
+        - name: test-script
+          mountPath: /scripts
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      volumes:
+      - name: test-script
+        configMap:
+          name: connectivity-test-script
+          defaultMode: 0755
