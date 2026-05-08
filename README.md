@@ -133,16 +133,138 @@ Configure comprehensive monitoring and logging using Prometheus and Elastic Stac
 
 ### ⚙️ Configuration and Scripts
 
-#### [📄 Environment Variables Script](./howto/eks-env-variables.sh)
+#### [📄 Environment Variables Script](./scripts/env.sh)
 **Centralized environment configuration**
 - 🎯 **Scope**: All required environment variables for TIBCO Platform deployment on EKS
-- 🔧 **Features**:
+- 🔧 **Features** (18 sections):
   - AWS region and EKS cluster variables
   - TIBCO Platform specific configurations
   - DNS and certificate settings (Route 53, ACM)
   - Container registry and Helm chart configurations
   - Network and storage configurations (EFS, EBS)
+  - Database, email, admin user, and proxy settings
 - 📋 **Use Case**: Quick environment setup, variable standardization, deployment automation
+
+---
+
+## ⚙️ Azure DevOps Pipelines
+
+The `pipelines/azure-devops/` folder contains ready-to-import Azure DevOps pipeline YAML files that automate the most common operational tasks. All pipelines share a reusable step template for AWS authentication and EKS kubeconfig setup.
+
+### Pipeline Overview
+
+| Pipeline | File | Trigger | Purpose |
+|:---------|:-----|:--------|:--------|
+| **Test PostgreSQL Connectivity** | [`test-postgres-connectivity.yml`](./pipelines/azure-devops/test-postgres-connectivity.yml) | Manual | Validate Aurora DB is reachable from EKS before deploying CP |
+| **Deploy Control Plane** | [`deploy-tibco-control-plane.yml`](./pipelines/azure-devops/deploy-tibco-control-plane.yml) | Manual | Full CP deployment: namespace → secrets → helm install → verify |
+| **Namespace Health Check** | [`check-namespace-health.yml`](./pipelines/azure-devops/check-namespace-health.yml) | Manual + every 6 h | Diagnose pod errors, PVC issues, events, and node pressure |
+
+### Pipeline Architecture
+
+```mermaid
+graph TD
+    VG[Azure DevOps Variable Group\ntibco-platform-eks-secrets\nAWS keys · DB password · Registry password] --> P1
+    VG --> P2
+    VG --> P3
+
+    P1["🔍 test-postgres-connectivity.yml\n─────────────────────────\n1 · Update kubeconfig\n2 · Create temp K8s secret\n3 · Deploy K8s Job with psql\n   pg_isready check\n   SELECT 1 check\n   SSL handshake check\n4 · Stream Job logs\n5 · Cleanup Job + secret"]
+
+    P1 -->|Pass| P2
+
+    P2["🚀 deploy-tibco-control-plane.yml\n─────────────────────────────────\nStage 1 · Validate\n  prereqs · helm repo · ingress\nStage 2 · Prerequisites\n  namespace · SA · session-keys\n  cporch-encryption-secret\n  rds-ca-cert (verify-full only)\nStage 3 · Deploy\n  generate values.yaml\n  helm upgrade --install\nStage 4 · Verify\n  pods · deployments · access URL"]
+
+    P2 -->|Deployed| P3
+
+    P3["🩺 check-namespace-health.yml\n──────────────────────────────\nRuns on schedule (every 6 h)\nor triggered manually\n──────────────────────────────\n10 checks per namespace:\n  pods · deployments · statefulsets\n  daemonsets · failed jobs · PVCs\n  warning events · ingresses\n  required secrets · pod logs\n+ Node health (pressure checks)"]
+```
+
+### Setup: Azure DevOps Variable Group
+
+All three pipelines require a Variable Group named **`tibco-platform-eks-secrets`** in your Azure DevOps project library. Create it once and link it to Azure Key Vault for production use.
+
+**Project Settings → Pipelines → Library → + Variable group**
+
+| Variable | Type | Description |
+|:---------|:-----|:------------|
+| `AWS_ACCESS_KEY_ID` | Secret | IAM access key for EKS and AWS API operations |
+| `AWS_SECRET_ACCESS_KEY` | Secret | Corresponding IAM secret key |
+| `AWS_SESSION_TOKEN` | Secret | Optional — for assumed-role sessions |
+| `TP_CONTAINER_REGISTRY_PASSWORD` | Secret | JFrog Artifactory API key / password |
+| `TP_DB_PASSWORD` | Secret | Aurora PostgreSQL master password |
+| `TP_ADMIN_INITIAL_PASSWORD` | Secret | Initial CP admin password (min 8 chars) |
+| `TP_SMTP_PASSWORD` | Secret | Optional — SMTP relay password |
+| `TP_SENDGRID_API_KEY` | Secret | Optional — SendGrid API key |
+| `TP_LOGSERVER_PASSWORD` | Secret | Optional — Elasticsearch password |
+
+**Azure Key Vault integration (recommended for production):**
+```bash
+# Create Key Vault
+az keyvault create --name tibco-platform-kv --resource-group my-rg --location eastus
+
+# Store secrets
+az keyvault secret set --vault-name tibco-platform-kv --name AWS-ACCESS-KEY-ID --value "AKIA..."
+az keyvault secret set --vault-name tibco-platform-kv --name TP-DB-PASSWORD --value "your-db-password"
+# ... repeat for each secret
+```
+Then in Azure DevOps Library, create the variable group linked to the Key Vault — Azure DevOps fetches secrets at pipeline runtime without storing them in the repo.
+
+### Pipeline 1: Test PostgreSQL Connectivity
+
+**Run this before deploying the Control Plane.** It launches a Kubernetes Job inside the EKS cluster that exercises the same VPC routing, security groups, and network policies the CP orchestrator will use.
+
+```
+Checks performed:
+  ✓ pg_isready          — network path + DB process running
+  ✓ psql SELECT 1       — credentials accepted, DB login works
+  ✓ SHOW ssl            — SSL handshake active (skipped for sslmode=disable)
+  ✓ DB version info     — Aurora version, current_user, inet_server_addr()
+```
+
+**Import and run:**
+1. In Azure DevOps → Pipelines → New pipeline → Azure Repos Git → select this repo
+2. Choose **Existing Azure Pipelines YAML file** → `pipelines/azure-devops/test-postgres-connectivity.yml`
+3. Set parameters: `dbHost` (Aurora writer endpoint), `dbSslMode`
+4. Run — fix any CRITICAL failures before proceeding to pipeline 2
+
+### Pipeline 2: Deploy TIBCO Control Plane
+
+A **4-stage idempotent pipeline** — safe to run for both fresh installs and upgrades.
+
+| Stage | What happens |
+|:------|:-------------|
+| **Validate** | Cluster access · Helm repo reachability · ingress class · EFS StorageClass |
+| **Prerequisites** | Create namespace · service account · `session-keys` · `cporch-encryption-secret` · RDS CA cert (verify-full) |
+| **Deploy** | Generate `tibco-cp-base` values.yaml from parameters · `helm upgrade --install --wait` |
+| **Verify** | Pod/deployment status · print Admin Portal URL and login flow |
+
+> **Important:** `session-keys` and `cporch-encryption-secret` are **preserved on re-runs** — they are only generated on first deployment. Changing them after initial deployment invalidates all user sessions and breaks Data Plane connectivity respectively. Back them up to Azure Key Vault after the first run.
+
+**CP access flow after deployment:**
+1. Log in to Admin Portal: `https://admin.<cpInstanceId>-my.<hostedZoneDomain>/admin/login`
+2. Change the initial password, then create a subscription with a `hostPrefix`
+3. Use the Subscription Portal `https://<hostPrefix>.<cpInstanceId>-my.<hostedZoneDomain>` for Data Plane registration and capability provisioning (BW6, BWCE, Flogo, EMS, DeveloperHub)
+
+### Pipeline 3: Namespace Health Check
+
+**Runs every 6 hours automatically** and can be triggered manually for on-demand diagnostics. Useful when users report CP or DP unavailability, or before raising a TIBCO support ticket.
+
+```
+10 checks per namespace:
+  1. Pod status        — CrashLoopBackOff · OOMKilled · ImagePullBackOff · Pending · Error
+  2. Deployments       — desired vs ready replica count
+  3. StatefulSets      — desired vs ready replica count
+  4. DaemonSets        — desired vs ready count
+  5. Failed Jobs       — batch jobs in failed state
+  6. PVCs              — Pending or Lost PersistentVolumeClaims
+  7. Warning Events    — last N minutes (default: 60)
+  8. Ingresses         — ALB address not yet assigned
+  9. Required Secrets  — session-keys · cporch-encryption-secret (CP only)
+ 10. Pod logs          — last 100 lines + previous container logs for failing pods
+
+  + Node health: Ready status · MemoryPressure · DiskPressure · PIDPressure · kubectl top
+```
+
+**Output format:** Each finding is tagged `[CRITICAL]`, `[WARNING]`, or `[INFO]` with a specific remediation hint. The pipeline fails when CRITICAL issues are found (configurable via `failOnCritical` parameter).
 
 ## 🎯 Deployment Scenarios
 
@@ -237,10 +359,26 @@ Before you begin, ensure you have:
 Review the [Prerequisites Checklist](./howto/prerequisites-checklist-for-customer) to ensure all requirements are met.
 
 ### Step 3: Configure Environment
-Use the [Environment Variables Script](./howto/eks-env-variables.sh) to set up your environment variables.
+Source [`scripts/env.sh`](./scripts/env.sh) and override values for your environment:
+```bash
+source scripts/env.sh
+export TP_CLUSTER_NAME="my-eks-cluster"
+export TP_HOSTED_ZONE_DOMAIN="mycompany.aws.com"
+export TP_CONTAINER_REGISTRY_USER="my-jfrog-user"
+export TP_CONTAINER_REGISTRY_PASSWORD="my-jfrog-token"
+```
 
-### Step 4: Deploy
-Follow the chosen guide step-by-step for deployment.
+### Step 4: (Optional) Automate with Azure DevOps Pipelines
+If you are using Azure DevOps, import the pipelines from `pipelines/azure-devops/` to automate the deployment:
+
+1. **Validate DB connectivity first**: run [`test-postgres-connectivity.yml`](./pipelines/azure-devops/test-postgres-connectivity.yml)
+2. **Deploy the Control Plane**: run [`deploy-tibco-control-plane.yml`](./pipelines/azure-devops/deploy-tibco-control-plane.yml)
+3. **Monitor health on schedule**: import [`check-namespace-health.yml`](./pipelines/azure-devops/check-namespace-health.yml) — it runs every 6 hours automatically
+
+See the [Azure DevOps Pipelines](#️-azure-devops-pipelines) section for full setup instructions.
+
+### Step 5: Deploy Manually
+Follow the chosen guide step-by-step for manual deployment.
 
 ## 📦 Repository Contents
 
@@ -248,19 +386,22 @@ Follow the chosen guide step-by-step for deployment.
 workshop-tp-eks/
 ├── README.md                                    # This file
 ├── LICENSE                                      # MIT License
-├── .gitignore                                   # Git ignore rules
 ├── howto/                                       # How-to guides
 │   ├── how-to-cp-and-dp-eks-setup-guide.md     # CP + DP full setup guide
 │   ├── how-to-dp-eks-setup-guide.md            # Data Plane only guide
 │   ├── how-to-dp-eks-observability.md          # Observability setup
 │   ├── how-to-add-dns-records-eks-aws.md       # Route 53 DNS configuration
-│   ├── how-to-upload-bw6-driver-supplements.md # BW6 driver upload guide
-│   ├── prerequisites-checklist-for-customer.md # Pre-installation checklist
-│   ├── eks-env-variables.sh                    # Environment variables script
-│   └── v1.16/
-│       └── QUICK-REFERENCE.md                  # Quick reference for v1.16
+│   └── prerequisites-checklist-for-customer.md # Pre-installation checklist
 ├── scripts/                                     # Utility scripts
-│   └── connectivity-test-job.yaml              # Network connectivity test
+│   ├── env.sh                                  # All environment variables (18 sections)
+│   └── connectivity-test-job.yaml              # Network connectivity test K8s Job
+├── pipelines/                                   # CI/CD automation
+│   └── azure-devops/
+│       ├── test-postgres-connectivity.yml       # Validate Aurora DB before CP deploy
+│       ├── deploy-tibco-control-plane.yml       # 4-stage CP deployment pipeline
+│       ├── check-namespace-health.yml           # Scheduled CP/DP health check
+│       └── templates/
+│           └── aws-eks-setup-steps.yml          # Reusable AWS auth + kubeconfig steps
 ├── docs/                                        # Additional documentation
 │   └── firewall-requirements-eks.md            # AWS/EKS firewall requirements
 └── releases/                                    # Release notes
@@ -341,9 +482,12 @@ workshop-tp-eks/
 ### Advanced Path (Production)
 1. Design multi-region architecture with Route 53 failover
 2. Implement high availability with Multi-AZ RDS Aurora
-3. Set up disaster recovery
-4. Configure advanced monitoring and alerting
-5. Implement CI/CD pipelines
+3. Set up disaster recovery (back up `session-keys` and `cporch-encryption-secret` to Azure Key Vault)
+4. Configure advanced monitoring and alerting via [Observability Guide](./howto/how-to-dp-eks-observability)
+5. Automate with [Azure DevOps Pipelines](#️-azure-devops-pipelines):
+   - Run the health check pipeline on a 6-hour schedule
+   - Trigger CP deployment from your release pipeline after infrastructure is ready
+   - Use `test-postgres-connectivity.yml` as a gate before every CP upgrade
 
 ## 🆘 Troubleshooting
 
@@ -365,10 +509,11 @@ workshop-tp-eks/
 - **Load balancer not created**: Verify AWS Load Balancer Controller and IAM role
 
 ### Getting Help
-1. Check the [Official TIBCO Documentation](https://docs.tibco.com/pub/platform-cp/1.17.0/doc/html/Default.htm#Installation/setting-up-cluster-for-control-plane.htm)
-2. Review the [EKS Workshop in tp-helm-charts](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
-3. Review GitHub issues in [tp-helm-charts repository](https://github.com/TIBCOSoftware/tp-helm-charts)
-4. Contact TIBCO Support for production issues
+1. **Run the health check pipeline first**: [`check-namespace-health.yml`](./pipelines/azure-devops/check-namespace-health.yml) produces a structured diagnostic report with remediation hints for every finding — attach the pipeline log when raising a support ticket
+2. Check the [Official TIBCO Documentation](https://docs.tibco.com/pub/platform-cp/1.17.0/doc/html/Default.htm#Installation/setting-up-cluster-for-control-plane.htm)
+3. Review the [EKS Workshop in tp-helm-charts](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
+4. Review GitHub issues in [tp-helm-charts repository](https://github.com/TIBCOSoftware/tp-helm-charts)
+5. Contact TIBCO Support for production issues
 
 ## 🤝 Contributing
 
@@ -408,14 +553,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📅 Version History
 
+- **v1.1.0** (May 2026): Azure DevOps pipelines
+  - [`test-postgres-connectivity.yml`](./pipelines/azure-devops/test-postgres-connectivity.yml) — K8s Job-based Aurora DB connectivity validation
+  - [`deploy-tibco-control-plane.yml`](./pipelines/azure-devops/deploy-tibco-control-plane.yml) — 4-stage idempotent CP deployment
+  - [`check-namespace-health.yml`](./pipelines/azure-devops/check-namespace-health.yml) — scheduled CP/DP health diagnostics (10 checks + node pressure)
+  - Reusable step template: `templates/aws-eks-setup-steps.yml`
+
 - **v1.0.0** (May 2026): Initial release
   - Complete EKS deployment guides based on tp-helm-charts EKS workshop
-  - Prerequisites checklist
-  - Observability setup
-  - DNS configuration guides
+  - Prerequisites checklist, observability setup, DNS configuration guides
+  - `scripts/env.sh` with 18 sections covering all deployment variables
+  - Aurora PostgreSQL SSL configuration (disable / require / verify-full)
 
 ---
 
 **Maintained by**: TIBCO-BNL Team
 
-**Last Updated**: May 7, 2026
+**Last Updated**: May 8, 2026
