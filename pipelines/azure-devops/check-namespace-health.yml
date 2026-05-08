@@ -1,0 +1,866 @@
+# =============================================================================
+# Pipeline: TIBCO Platform Namespace Health Check
+#
+# Purpose:
+#   Inspects the Control Plane and/or Data Plane Kubernetes namespaces for
+#   errors, unhealthy resources, and warning events. Produces a structured
+#   diagnostic report in the pipeline log and fails the run when CRITICAL
+#   issues are found.
+#
+# When to run:
+#   - After deploying or upgrading the Control Plane or Data Plane
+#   - When users report CP/DP unavailability or capability failures
+#   - On a schedule (cron trigger below) for proactive monitoring
+#   - Before raising a support ticket with TIBCO — attach the pipeline log
+#
+# Checks performed per namespace:
+#   1. Pod status        — CrashLoopBackOff, OOMKilled, ImagePullBackOff,
+#                          Pending, Error, excessive restarts
+#   2. Deployments       — desired vs ready replica count
+#   3. StatefulSets      — desired vs ready replica count
+#   4. DaemonSets        — desired vs ready count
+#   5. Failed Jobs       — batch jobs that have failed
+#   6. PVC status        — unbound or lost PersistentVolumeClaims
+#   7. Warning events    — Kubernetes Warning events in the last hour
+#   8. Ingress health    — ingresses with no address assigned (ALB not created)
+#   9. Required secrets  — CP: session-keys, cporch-encryption-secret present?
+#  10. Pod logs          — last 100 lines from every non-Running pod
+#
+# Pre-requisites:
+#   Azure DevOps Variable Group "tibco-platform-eks-secrets" containing:
+#     AWS_ACCESS_KEY_ID      (secret)
+#     AWS_SECRET_ACCESS_KEY  (secret)
+#     AWS_SESSION_TOKEN      (secret, optional)
+# =============================================================================
+
+trigger: none  # Run manually or via the schedule below
+
+schedules:
+  - cron: "0 */6 * * *"     # Every 6 hours — proactive health monitoring
+    displayName: 'Every 6 hours'
+    branches:
+      include:
+        - main
+    always: true             # Run even when there are no code changes
+
+parameters:
+  # --- Scope ---
+  - name: checkScope
+    displayName: 'What to check'
+    type: string
+    default: 'cp_and_dp'
+    values:
+      - cp_and_dp
+      - cp_only
+      - dp_only
+
+  # --- Cluster ---
+  - name: awsRegion
+    displayName: 'AWS Region'
+    type: string
+    default: 'us-west-2'
+
+  - name: eksClusterName
+    displayName: 'EKS Cluster Name'
+    type: string
+    default: 'eks-cluster-us-west-2'
+
+  # --- Control Plane ---
+  - name: cpInstanceId
+    displayName: 'CP Instance ID (namespace = <cpInstanceId>-ns)'
+    type: string
+    default: 'cp1'
+
+  # --- Data Plane ---
+  - name: dpNamespace
+    displayName: 'Data Plane Namespace (e.g. dp1-ns)'
+    type: string
+    default: 'dp1-ns'
+
+  # --- Behavior ---
+  - name: failOnCritical
+    displayName: 'Fail pipeline when CRITICAL issues are found'
+    type: boolean
+    default: true
+
+  - name: fetchPodLogs
+    displayName: 'Fetch logs from unhealthy pods (slower but more detail)'
+    type: boolean
+    default: true
+
+  - name: restartThreshold
+    displayName: 'Restart count threshold for WARNING (pods restarted more than N times)'
+    type: number
+    default: 5
+
+  - name: eventLookbackMinutes
+    displayName: 'Look back N minutes for Warning events'
+    type: number
+    default: 60
+
+variables:
+  - group: tibco-platform-eks-secrets
+  - name: cpNamespace
+    value: '${{ parameters.cpInstanceId }}-ns'
+
+# =============================================================================
+# Shared health-check script stored as a multi-line variable so it can be
+# called identically for both CP and DP namespaces without duplication.
+# The script is written to a file by a setup step and then sourced.
+# =============================================================================
+
+stages:
+  - stage: HealthCheck
+    displayName: 'TIBCO Platform Namespace Health Check'
+    jobs:
+      - job: HealthCheckJob
+        displayName: 'Run Health Checks'
+        pool:
+          vmImage: 'ubuntu-latest'
+        timeoutInMinutes: 20
+
+        steps:
+          - checkout: none
+
+          # ------------------------------------------------------------------
+          # Step 1: AWS auth + EKS kubeconfig
+          # ------------------------------------------------------------------
+          - template: templates/aws-eks-setup-steps.yml
+            parameters:
+              awsRegion: ${{ parameters.awsRegion }}
+              eksClusterName: ${{ parameters.eksClusterName }}
+              installHelm: false
+
+          # ------------------------------------------------------------------
+          # Step 2: Write the reusable health-check function library to disk.
+          # Both the CP and DP checks call the same functions — this avoids
+          # duplicating 300+ lines of bash in each conditional step below.
+          # ------------------------------------------------------------------
+          - script: |
+              cat > /tmp/health-check-lib.sh << 'LIBEOF'
+              #!/bin/bash
+              # =================================================================
+              # TIBCO Platform Namespace Health Check Library
+              # =================================================================
+
+              RED='\033[0;31m'
+              YELLOW='\033[1;33m'
+              GREEN='\033[0;32m'
+              CYAN='\033[0;36m'
+              BOLD='\033[1m'
+              NC='\033[0m'
+
+              CRITICAL_COUNT=0
+              WARNING_COUNT=0
+              INFO_COUNT=0
+
+              log_critical() { echo -e "${RED}[CRITICAL]${NC} $*"; CRITICAL_COUNT=$((CRITICAL_COUNT+1)); }
+              log_warning()  { echo -e "${YELLOW}[WARNING] ${NC} $*"; WARNING_COUNT=$((WARNING_COUNT+1)); }
+              log_ok()       { echo -e "${GREEN}[OK]      ${NC} $*"; }
+              log_info()     { echo -e "${CYAN}[INFO]    ${NC} $*"; INFO_COUNT=$((INFO_COUNT+1)); }
+              log_section()  { echo ""; echo -e "${BOLD}━━━ $* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
+
+              # ---------------------------------------------------------------
+              # check_pods <namespace> <restart_threshold>
+              # ---------------------------------------------------------------
+              check_pods() {
+                local ns="$1"
+                local restart_threshold="$2"
+
+                log_section "Pod Status — ${ns}"
+
+                local pods
+                pods=$(kubectl get pods -n "${ns}" --no-headers 2>/dev/null) || {
+                  log_critical "Cannot list pods in namespace '${ns}' — does the namespace exist?"
+                  return
+                }
+
+                if [ -z "${pods}" ]; then
+                  log_warning "No pods found in namespace '${ns}'"
+                  return
+                fi
+
+                local total=0 running=0 completed=0 problem=0
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  total=$((total+1))
+
+                  local pod_name status ready restarts age
+                  pod_name=$(echo "${line}" | awk '{print $1}')
+                  ready=$(echo "${line}" | awk '{print $2}')
+                  status=$(echo "${line}" | awk '{print $3}')
+                  restarts=$(echo "${line}" | awk '{print $4}')
+                  age=$(echo "${line}" | awk '{print $5}')
+
+                  # Strip numeric suffix from restarts like "5 (2h ago)"
+                  restarts_num=$(echo "${restarts}" | grep -oE '^[0-9]+')
+
+                  case "${status}" in
+                    Running)
+                      if [ "${restarts_num:-0}" -gt "${restart_threshold}" ]; then
+                        log_warning "Pod ${pod_name} is Running but has restarted ${restarts_num} times (threshold: ${restart_threshold})"
+                        log_info    "  Ready: ${ready} | Age: ${age}"
+                        problem=$((problem+1))
+                      else
+                        running=$((running+1))
+                        log_ok "Pod ${pod_name} — Running (ready: ${ready}, restarts: ${restarts_num}, age: ${age})"
+                      fi
+                      ;;
+                    Completed|Succeeded)
+                      completed=$((completed+1))
+                      log_ok "Pod ${pod_name} — ${status} (job pod, age: ${age})"
+                      ;;
+                    CrashLoopBackOff)
+                      log_critical "Pod ${pod_name} — CrashLoopBackOff (restarts: ${restarts_num}, age: ${age})"
+                      log_info     "  Action: Check logs with: kubectl logs ${pod_name} -n ${ns} --previous"
+                      problem=$((problem+1))
+                      ;;
+                    OOMKilled)
+                      log_critical "Pod ${pod_name} — OOMKilled (Out of Memory, restarts: ${restarts_num})"
+                      log_info     "  Action: Increase memory limits or check for memory leak"
+                      problem=$((problem+1))
+                      ;;
+                    ImagePullBackOff|ErrImagePull)
+                      log_critical "Pod ${pod_name} — ${status} (restarts: ${restarts_num})"
+                      log_info     "  Action: Check container registry credentials (TP_CONTAINER_REGISTRY_PASSWORD)"
+                      log_info     "  Run: kubectl describe pod ${pod_name} -n ${ns}"
+                      problem=$((problem+1))
+                      ;;
+                    Pending)
+                      log_warning "Pod ${pod_name} — Pending (age: ${age})"
+                      log_info    "  Action: Check node resources, PVC binding, and scheduling constraints"
+                      log_info    "  Run: kubectl describe pod ${pod_name} -n ${ns}"
+                      problem=$((problem+1))
+                      ;;
+                    Init:*)
+                      log_warning "Pod ${pod_name} — Initializing (${status}, age: ${age})"
+                      log_info    "  This may be normal during startup — re-check in a few minutes"
+                      ;;
+                    Terminating)
+                      log_info "Pod ${pod_name} — Terminating (age: ${age}) — normal during rolling updates"
+                      ;;
+                    Error|CreateContainerConfigError|InvalidImageName)
+                      log_critical "Pod ${pod_name} — ${status} (restarts: ${restarts_num})"
+                      log_info     "  Action: kubectl describe pod ${pod_name} -n ${ns}"
+                      problem=$((problem+1))
+                      ;;
+                    *)
+                      log_warning "Pod ${pod_name} — Unexpected status: ${status} (restarts: ${restarts_num}, age: ${age})"
+                      problem=$((problem+1))
+                      ;;
+                  esac
+                done <<< "${pods}"
+
+                echo ""
+                log_info "Pod summary: ${total} total | ${running} running | ${completed} completed | ${problem} with issues"
+              }
+
+              # ---------------------------------------------------------------
+              # check_deployments <namespace>
+              # ---------------------------------------------------------------
+              check_deployments() {
+                local ns="$1"
+                log_section "Deployments — ${ns}"
+
+                local deploys
+                deploys=$(kubectl get deployments -n "${ns}" --no-headers 2>/dev/null) || return
+
+                if [ -z "${deploys}" ]; then
+                  log_info "No Deployments found in namespace '${ns}'"
+                  return
+                fi
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local name ready up_to_date available age
+                  name=$(echo "${line}" | awk '{print $1}')
+                  ready=$(echo "${line}" | awk '{print $2}')      # e.g. "2/2"
+                  up_to_date=$(echo "${line}" | awk '{print $3}')
+                  available=$(echo "${line}" | awk '{print $4}')
+                  age=$(echo "${line}" | awk '{print $5}')
+
+                  local desired actual
+                  desired=$(echo "${ready}" | cut -d/ -f2)
+                  actual=$(echo "${ready}" | cut -d/ -f1)
+
+                  if [ "${actual}" = "${desired}" ] && [ "${available}" = "${desired}" ]; then
+                    log_ok "Deployment ${name} — ${actual}/${desired} ready (age: ${age})"
+                  elif [ "${actual}" = "0" ]; then
+                    log_critical "Deployment ${name} — 0/${desired} ready (available: ${available}, age: ${age})"
+                    log_info     "  Action: kubectl describe deployment ${name} -n ${ns}"
+                  else
+                    log_warning "Deployment ${name} — ${actual}/${desired} ready (available: ${available}, age: ${age})"
+                    log_info    "  Action: Rolling update in progress, or pods are crashing"
+                  fi
+                done <<< "${deploys}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_statefulsets <namespace>
+              # ---------------------------------------------------------------
+              check_statefulsets() {
+                local ns="$1"
+                log_section "StatefulSets — ${ns}"
+
+                local sts
+                sts=$(kubectl get statefulsets -n "${ns}" --no-headers 2>/dev/null) || return
+
+                if [ -z "${sts}" ]; then
+                  log_info "No StatefulSets found in namespace '${ns}'"
+                  return
+                fi
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local name ready age
+                  name=$(echo "${line}" | awk '{print $1}')
+                  ready=$(echo "${line}" | awk '{print $2}')
+                  age=$(echo "${line}" | awk '{print $3}')
+
+                  local desired actual
+                  desired=$(echo "${ready}" | cut -d/ -f2)
+                  actual=$(echo "${ready}" | cut -d/ -f1)
+
+                  if [ "${actual}" = "${desired}" ]; then
+                    log_ok "StatefulSet ${name} — ${actual}/${desired} ready (age: ${age})"
+                  elif [ "${actual}" = "0" ]; then
+                    log_critical "StatefulSet ${name} — 0/${desired} ready (age: ${age})"
+                    log_info     "  Action: kubectl describe statefulset ${name} -n ${ns}"
+                  else
+                    log_warning "StatefulSet ${name} — ${actual}/${desired} ready (age: ${age})"
+                  fi
+                done <<< "${sts}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_daemonsets <namespace>
+              # ---------------------------------------------------------------
+              check_daemonsets() {
+                local ns="$1"
+                log_section "DaemonSets — ${ns}"
+
+                local ds
+                ds=$(kubectl get daemonsets -n "${ns}" --no-headers 2>/dev/null) || return
+
+                if [ -z "${ds}" ]; then
+                  log_info "No DaemonSets found in namespace '${ns}'"
+                  return
+                fi
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local name desired current ready available age
+                  name=$(echo "${line}" | awk '{print $1}')
+                  desired=$(echo "${line}" | awk '{print $2}')
+                  current=$(echo "${line}" | awk '{print $3}')
+                  ready=$(echo "${line}" | awk '{print $4}')
+                  available=$(echo "${line}" | awk '{print $6}')
+                  age=$(echo "${line}" | awk '{print $8}')
+
+                  if [ "${ready}" = "${desired}" ]; then
+                    log_ok "DaemonSet ${name} — ${ready}/${desired} ready (age: ${age})"
+                  else
+                    log_warning "DaemonSet ${name} — ${ready}/${desired} ready (current: ${current}, available: ${available})"
+                  fi
+                done <<< "${ds}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_failed_jobs <namespace>
+              # ---------------------------------------------------------------
+              check_failed_jobs() {
+                local ns="$1"
+                log_section "Failed Jobs — ${ns}"
+
+                local failed_jobs
+                failed_jobs=$(kubectl get jobs -n "${ns}" --no-headers 2>/dev/null \
+                  | awk '$3 != "0" || $2 == "0/1"' || true)
+
+                if [ -z "${failed_jobs}" ]; then
+                  log_ok "No failed Jobs in namespace '${ns}'"
+                  return
+                fi
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local name completions duration age
+                  name=$(echo "${line}" | awk '{print $1}')
+                  completions=$(echo "${line}" | awk '{print $2}')
+                  duration=$(echo "${line}" | awk '{print $3}')
+                  age=$(echo "${line}" | awk '{print $4}')
+
+                  log_warning "Job ${name} — completions: ${completions}, duration: ${duration}, age: ${age}"
+                  log_info    "  Run: kubectl logs -n ${ns} -l job-name=${name} --tail=50"
+                done <<< "${failed_jobs}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_pvcs <namespace>
+              # ---------------------------------------------------------------
+              check_pvcs() {
+                local ns="$1"
+                log_section "PersistentVolumeClaims — ${ns}"
+
+                local pvcs
+                pvcs=$(kubectl get pvc -n "${ns}" --no-headers 2>/dev/null) || return
+
+                if [ -z "${pvcs}" ]; then
+                  log_info "No PVCs found in namespace '${ns}'"
+                  return
+                fi
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local name status volume capacity storageclass age
+                  name=$(echo "${line}" | awk '{print $1}')
+                  status=$(echo "${line}" | awk '{print $2}')
+                  volume=$(echo "${line}" | awk '{print $3}')
+                  capacity=$(echo "${line}" | awk '{print $4}')
+                  storageclass=$(echo "${line}" | awk '{print $6}')
+                  age=$(echo "${line}" | awk '{print $5}')
+
+                  case "${status}" in
+                    Bound)
+                      log_ok "PVC ${name} — Bound to ${volume} (${capacity}, StorageClass: ${storageclass})"
+                      ;;
+                    Pending)
+                      log_critical "PVC ${name} — Pending (StorageClass: ${storageclass}, age: ${age})"
+                      log_info     "  Action: Check if EFS/EBS CSI driver is running and StorageClass exists"
+                      log_info     "  Run: kubectl describe pvc ${name} -n ${ns}"
+                      ;;
+                    Lost)
+                      log_critical "PVC ${name} — Lost (backing PV no longer exists)"
+                      log_info     "  Action: PV may have been deleted; data may be unrecoverable"
+                      ;;
+                    *)
+                      log_warning "PVC ${name} — Unexpected status: ${status}"
+                      ;;
+                  esac
+                done <<< "${pvcs}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_warning_events <namespace> <lookback_minutes>
+              # ---------------------------------------------------------------
+              check_warning_events() {
+                local ns="$1"
+                local lookback="$2"
+                log_section "Warning Events (last ${lookback} minutes) — ${ns}"
+
+                local events
+                events=$(kubectl get events -n "${ns}" \
+                  --field-selector type=Warning \
+                  --sort-by='.lastTimestamp' \
+                  --no-headers 2>/dev/null | tail -30 || true)
+
+                if [ -z "${events}" ]; then
+                  log_ok "No Warning events in namespace '${ns}' (last ${lookback} minutes)"
+                  return
+                fi
+
+                local event_count
+                event_count=$(echo "${events}" | wc -l)
+                log_warning "${event_count} Warning event(s) found:"
+                echo ""
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local age reason obj msg
+                  age=$(echo "${line}" | awk '{print $1}')
+                  reason=$(echo "${line}" | awk '{print $3}')
+                  obj=$(echo "${line}" | awk '{print $4}')
+                  msg=$(echo "${line}" | awk '{$1=$2=$3=$4=""; print $0}' | sed 's/^ *//')
+
+                  echo -e "  ${YELLOW}${age}${NC} | ${reason} | ${obj}"
+                  echo    "    ${msg}"
+                done <<< "${events}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_ingresses <namespace>
+              # ---------------------------------------------------------------
+              check_ingresses() {
+                local ns="$1"
+                log_section "Ingresses — ${ns}"
+
+                local ingresses
+                ingresses=$(kubectl get ingress -n "${ns}" --no-headers 2>/dev/null) || {
+                  log_info "No Ingresses found in namespace '${ns}' (or ingress API unavailable)"
+                  return
+                }
+
+                if [ -z "${ingresses}" ]; then
+                  log_info "No Ingresses found in namespace '${ns}'"
+                  return
+                fi
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local name class hosts address ports age
+                  name=$(echo "${line}" | awk '{print $1}')
+                  class=$(echo "${line}" | awk '{print $2}')
+                  hosts=$(echo "${line}" | awk '{print $3}')
+                  address=$(echo "${line}" | awk '{print $4}')
+                  age=$(echo "${line}" | awk '{print $6}')
+
+                  if [ -z "${address}" ] || [ "${address}" = "<none>" ]; then
+                    log_warning "Ingress ${name} — No address assigned (class: ${class}, age: ${age})"
+                    log_info    "  Possible causes:"
+                    log_info    "    1. AWS Load Balancer Controller is not running"
+                    log_info    "    2. ALB security group or subnet tags are missing"
+                    log_info    "    3. ACM certificate ARN annotation is invalid"
+                    log_info    "  Run: kubectl describe ingress ${name} -n ${ns}"
+                  else
+                    log_ok "Ingress ${name} — ${address} (class: ${class}, hosts: ${hosts})"
+                  fi
+                done <<< "${ingresses}"
+              }
+
+              # ---------------------------------------------------------------
+              # check_required_secrets <namespace> <secret_name>...
+              # ---------------------------------------------------------------
+              check_required_secrets() {
+                local ns="$1"
+                shift
+                log_section "Required Secrets — ${ns}"
+
+                for secret_name in "$@"; do
+                  if kubectl get secret "${secret_name}" -n "${ns}" &>/dev/null; then
+                    local keys
+                    keys=$(kubectl get secret "${secret_name}" -n "${ns}" \
+                      -o jsonpath='{.data}' | python3 -c \
+                      "import sys,json; d=json.load(sys.stdin); print(', '.join(d.keys()))" 2>/dev/null || echo "unknown keys")
+                    log_ok "Secret '${secret_name}' exists (keys: ${keys})"
+                  else
+                    log_critical "Secret '${secret_name}' is MISSING in namespace '${ns}'"
+                    log_info     "  This secret is required for CP to function."
+                    log_info     "  Re-run the deploy-tibco-control-plane.yml pipeline Prerequisites stage."
+                  fi
+                done
+              }
+
+              # ---------------------------------------------------------------
+              # fetch_pod_logs <namespace> <restart_threshold>
+              # ---------------------------------------------------------------
+              fetch_pod_logs() {
+                local ns="$1"
+                local restart_threshold="$2"
+                log_section "Pod Logs (unhealthy pods) — ${ns}"
+
+                local pods
+                pods=$(kubectl get pods -n "${ns}" --no-headers 2>/dev/null) || return
+
+                local found_unhealthy=false
+
+                while IFS= read -r line; do
+                  [ -z "${line}" ] && continue
+                  local pod_name status restarts
+                  pod_name=$(echo "${line}" | awk '{print $1}')
+                  status=$(echo "${line}" | awk '{print $3}')
+                  restarts=$(echo "${line}" | awk '{print $4}' | grep -oE '^[0-9]+')
+
+                  local should_fetch=false
+                  case "${status}" in
+                    CrashLoopBackOff|OOMKilled|Error|ImagePullBackOff|ErrImagePull|CreateContainerConfigError)
+                      should_fetch=true ;;
+                    Running)
+                      [ "${restarts:-0}" -gt "${restart_threshold}" ] && should_fetch=true ;;
+                    Pending)
+                      should_fetch=true ;;
+                  esac
+
+                  if [ "${should_fetch}" = "true" ]; then
+                    found_unhealthy=true
+                    echo ""
+                    echo -e "${YELLOW}>>> Logs for pod: ${pod_name} (status: ${status}, restarts: ${restarts}) <<<${NC}"
+                    echo "    kubectl logs ${pod_name} -n ${ns} --tail=100"
+                    echo "    ─────────────────────────────────────────────"
+
+                    # Current container logs
+                    kubectl logs "${pod_name}" -n "${ns}" --tail=100 --all-containers=true 2>&1 || \
+                      echo "    (Could not fetch current logs)"
+
+                    # Previous container logs (for restarted containers)
+                    if kubectl logs "${pod_name}" -n "${ns}" --previous --tail=50 \
+                        --all-containers=true &>/dev/null 2>&1; then
+                      echo ""
+                      echo "    --- Previous container logs (before last restart) ---"
+                      kubectl logs "${pod_name}" -n "${ns}" --previous --tail=50 \
+                        --all-containers=true 2>&1 || true
+                    fi
+
+                    # kubectl describe for pending pods (shows events + scheduling info)
+                    if [ "${status}" = "Pending" ]; then
+                      echo ""
+                      echo "    --- kubectl describe (Pending pod) ---"
+                      kubectl describe pod "${pod_name}" -n "${ns}" | \
+                        grep -A 20 "^Events:" || true
+                    fi
+                    echo ""
+                  fi
+                done <<< "${pods}"
+
+                if [ "${found_unhealthy}" = "false" ]; then
+                  log_ok "No unhealthy pods requiring log inspection"
+                fi
+              }
+
+              # ---------------------------------------------------------------
+              # print_summary <namespace>
+              # ---------------------------------------------------------------
+              print_summary() {
+                local ns="$1"
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo -e "${BOLD}Health Check Summary — ${ns}${NC}"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo -e "  ${RED}CRITICAL : ${CRITICAL_COUNT}${NC}"
+                echo -e "  ${YELLOW}WARNING  : ${WARNING_COUNT}${NC}"
+                echo -e "  ${CYAN}INFO     : ${INFO_COUNT}${NC}"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                # Reset counters for next namespace check
+                CRITICAL_COUNT=0
+                WARNING_COUNT=0
+                INFO_COUNT=0
+              }
+
+              LIBEOF
+              chmod +x /tmp/health-check-lib.sh
+              echo "Health check library written to /tmp/health-check-lib.sh"
+            displayName: 'Write health check library'
+
+          # ------------------------------------------------------------------
+          # Step 3: Check Control Plane namespace
+          # Skipped when checkScope = "dp_only"
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              source /tmp/health-check-lib.sh
+
+              NS="$(cpNamespace)"
+              RESTART_THRESHOLD="${{ parameters.restartThreshold }}"
+              EVENT_LOOKBACK="${{ parameters.eventLookbackMinutes }}"
+
+              echo ""
+              echo "╔══════════════════════════════════════════════════════════════╗"
+              echo "║  CONTROL PLANE HEALTH CHECK                                  ║"
+              echo "║  Namespace : ${NS}"
+              echo "║  Cluster   : ${{ parameters.eksClusterName }}"
+              echo "║  Time      : $(date -u)"
+              echo "╚══════════════════════════════════════════════════════════════╝"
+
+              # Check if namespace exists
+              if ! kubectl get namespace "${NS}" &>/dev/null; then
+                log_critical "Namespace '${NS}' does not exist"
+                log_info     "  Deploy the CP first: pipelines/azure-devops/deploy-tibco-control-plane.yml"
+                print_summary "${NS}"
+                exit 1
+              fi
+
+              check_pods           "${NS}" "${RESTART_THRESHOLD}"
+              check_deployments    "${NS}"
+              check_statefulsets   "${NS}"
+              check_daemonsets     "${NS}"
+              check_failed_jobs    "${NS}"
+              check_pvcs           "${NS}"
+              check_warning_events "${NS}" "${EVENT_LOOKBACK}"
+              check_ingresses      "${NS}"
+
+              # CP-specific: verify required secrets exist
+              check_required_secrets "${NS}" \
+                "session-keys" \
+                "cporch-encryption-secret"
+
+              print_summary "${NS}"
+
+              # Exit code based on findings
+              if [ "${CRITICAL_COUNT:-0}" -gt 0 ] && [ "${{ parameters.failOnCritical }}" = "True" ]; then
+                echo ""
+                echo -e "${RED}Pipeline FAILED: ${CRITICAL_COUNT} CRITICAL issue(s) found in ${NS}${NC}"
+                echo "Review the CRITICAL entries above and address them before proceeding."
+                exit 1
+              fi
+            condition: ne('${{ parameters.checkScope }}', 'dp_only')
+            displayName: 'Check Control Plane namespace: $(cpNamespace)'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Step 4: Fetch pod logs for unhealthy CP pods (optional, slower)
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              source /tmp/health-check-lib.sh
+              fetch_pod_logs "$(cpNamespace)" "${{ parameters.restartThreshold }}"
+            condition: and(ne('${{ parameters.checkScope }}', 'dp_only'), eq('${{ parameters.fetchPodLogs }}', true))
+            displayName: 'Fetch logs from unhealthy CP pods'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Step 5: Check Data Plane namespace
+          # Skipped when checkScope = "cp_only"
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              source /tmp/health-check-lib.sh
+
+              NS="${{ parameters.dpNamespace }}"
+              RESTART_THRESHOLD="${{ parameters.restartThreshold }}"
+              EVENT_LOOKBACK="${{ parameters.eventLookbackMinutes }}"
+
+              echo ""
+              echo "╔══════════════════════════════════════════════════════════════╗"
+              echo "║  DATA PLANE HEALTH CHECK                                     ║"
+              echo "║  Namespace : ${NS}"
+              echo "║  Cluster   : ${{ parameters.eksClusterName }}"
+              echo "║  Time      : $(date -u)"
+              echo "╚══════════════════════════════════════════════════════════════╝"
+
+              # Check if namespace exists
+              if ! kubectl get namespace "${NS}" &>/dev/null; then
+                log_critical "Namespace '${NS}' does not exist"
+                log_info     "  Register the Data Plane from the CP UI first."
+                log_info     "  See: howto/how-to-dp-eks-setup-guide.md"
+                print_summary "${NS}"
+                exit 1
+              fi
+
+              check_pods           "${NS}" "${RESTART_THRESHOLD}"
+              check_deployments    "${NS}"
+              check_statefulsets   "${NS}"
+              check_daemonsets     "${NS}"
+              check_failed_jobs    "${NS}"
+              check_pvcs           "${NS}"
+              check_warning_events "${NS}" "${EVENT_LOOKBACK}"
+              check_ingresses      "${NS}"
+
+              # DP-specific: check for the DP agent/fluentbit pods
+              log_section "Data Plane Agent — ${NS}"
+              DP_AGENT_POD=$(kubectl get pods -n "${NS}" \
+                -l "app.kubernetes.io/name=dp-configure-namespace-agent" \
+                --no-headers 2>/dev/null | head -1 || true)
+
+              if [ -n "${DP_AGENT_POD}" ]; then
+                DP_STATUS=$(echo "${DP_AGENT_POD}" | awk '{print $3}')
+                DP_NAME=$(echo "${DP_AGENT_POD}" | awk '{print $1}')
+                if [ "${DP_STATUS}" = "Running" ]; then
+                  log_ok "DP configure-namespace-agent pod is Running (${DP_NAME})"
+                else
+                  log_critical "DP configure-namespace-agent pod status: ${DP_STATUS} (${DP_NAME})"
+                  log_info     "  The DP agent syncs capability configuration from the CP."
+                  log_info     "  If this pod is not running, capability provisioning will fail."
+                fi
+              else
+                log_info "DP configure-namespace-agent not found — may not be deployed yet"
+                log_info "  This pod appears after Data Plane registration in the CP UI"
+              fi
+
+              print_summary "${NS}"
+
+              if [ "${CRITICAL_COUNT:-0}" -gt 0 ] && [ "${{ parameters.failOnCritical }}" = "True" ]; then
+                echo ""
+                echo -e "${RED}Pipeline FAILED: ${CRITICAL_COUNT} CRITICAL issue(s) found in ${NS}${NC}"
+                exit 1
+              fi
+            condition: ne('${{ parameters.checkScope }}', 'cp_only')
+            displayName: 'Check Data Plane namespace: ${{ parameters.dpNamespace }}'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Step 6: Fetch pod logs for unhealthy DP pods (optional, slower)
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              source /tmp/health-check-lib.sh
+              fetch_pod_logs "${{ parameters.dpNamespace }}" "${{ parameters.restartThreshold }}"
+            condition: and(ne('${{ parameters.checkScope }}', 'cp_only'), eq('${{ parameters.fetchPodLogs }}', true))
+            displayName: 'Fetch logs from unhealthy DP pods'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Step 7: Cross-namespace node pressure check.
+          # Node-level issues (CPU throttling, memory pressure, disk pressure)
+          # affect all pods regardless of namespace — checked once at the end.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              source /tmp/health-check-lib.sh
+
+              echo ""
+              echo "╔══════════════════════════════════════════════════════════════╗"
+              echo "║  NODE HEALTH CHECK                                           ║"
+              echo "╚══════════════════════════════════════════════════════════════╝"
+              log_section "Node Status"
+
+              nodes=$(kubectl get nodes --no-headers 2>/dev/null) || {
+                log_critical "Cannot list nodes — check kubeconfig and cluster access"
+                exit 1
+              }
+
+              while IFS= read -r line; do
+                [ -z "${line}" ] && continue
+                local_name=$(echo "${line}" | awk '{print $1}')
+                node_status=$(echo "${line}" | awk '{print $2}')
+                role=$(echo "${line}" | awk '{print $3}')
+                age=$(echo "${line}" | awk '{print $4}')
+                version=$(echo "${line}" | awk '{print $5}')
+
+                if [ "${node_status}" = "Ready" ]; then
+                  log_ok "Node ${local_name} — Ready (role: ${role:-worker}, k8s: ${version}, age: ${age})"
+                else
+                  log_critical "Node ${local_name} — ${node_status} (role: ${role:-worker}, age: ${age})"
+                  log_info     "  Run: kubectl describe node ${local_name} | grep -A 10 Conditions"
+                fi
+              done <<< "${nodes}"
+
+              log_section "Node Conditions (pressure checks)"
+              kubectl get nodes -o json 2>/dev/null | python3 - << 'PYEOF'
+              import json, sys
+              data = json.load(sys.stdin)
+              pressure_conditions = ['MemoryPressure', 'DiskPressure', 'PIDPressure', 'NetworkUnavailable']
+              found_pressure = False
+              for node in data.get('items', []):
+                  name = node['metadata']['name']
+                  for cond in node.get('status', {}).get('conditions', []):
+                      if cond['type'] in pressure_conditions and cond['status'] == 'True':
+                          print(f"  \033[0;31m[CRITICAL]\033[0m Node {name}: {cond['type']} = True")
+                          print(f"            Message: {cond.get('message','')}")
+                          found_pressure = True
+              if not found_pressure:
+                  print("  \033[0;32m[OK]      \033[0m No node pressure conditions detected")
+              PYEOF
+
+              log_section "Top Resource Consumers (kubectl top)"
+              kubectl top nodes 2>/dev/null || log_info "metrics-server not available — cannot show node resource usage"
+              echo ""
+
+              SCOPE="${{ parameters.checkScope }}"
+              if [ "${SCOPE}" != "dp_only" ]; then
+                kubectl top pods -n "$(cpNamespace)" --sort-by=memory 2>/dev/null || true
+              fi
+              if [ "${SCOPE}" != "cp_only" ]; then
+                kubectl top pods -n "${{ parameters.dpNamespace }}" --sort-by=memory 2>/dev/null || true
+              fi
+            displayName: 'Check node health and resource pressure'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
