@@ -1,0 +1,107 @@
+# =============================================================================
+# Reusable step template: AWS credentials setup + EKS kubeconfig update
+#
+# Usage in a pipeline:
+#   steps:
+#     - template: templates/aws-eks-setup-steps.yml
+#       parameters:
+#         awsRegion:      $(TP_CLUSTER_REGION)
+#         eksClusterName: $(TP_CLUSTER_NAME)
+#
+# Required variable group (tibco-platform-eks-secrets) must contain:
+#   AWS_ACCESS_KEY_ID      — IAM user or assumed-role access key
+#   AWS_SECRET_ACCESS_KEY  — corresponding secret key
+#   AWS_SESSION_TOKEN      — (optional) for assumed-role sessions
+#
+# Tools installed by this template: aws-cli v2, kubectl, helm 3
+# =============================================================================
+
+parameters:
+  - name: awsRegion
+    type: string
+  - name: eksClusterName
+    type: string
+  - name: installHelm
+    type: boolean
+    default: true
+
+steps:
+  # ---------------------------------------------------------------------------
+  # Install AWS CLI v2 (ubuntu-latest agents ship v1; v2 supports eks get-token)
+  # ---------------------------------------------------------------------------
+  - script: |
+      if ! aws --version 2>&1 | grep -q "aws-cli/2"; then
+        echo "Installing AWS CLI v2..."
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+        unzip -q /tmp/awscliv2.zip -d /tmp
+        sudo /tmp/aws/install --update
+        rm -rf /tmp/awscliv2.zip /tmp/aws
+      fi
+      aws --version
+    displayName: 'Install AWS CLI v2'
+    env:
+      # Suppress interactive pager output in pipeline logs
+      AWS_PAGER: ""
+
+  # ---------------------------------------------------------------------------
+  # Configure AWS credentials from pipeline secret variables.
+  # These are injected as environment variables — never echo them.
+  # ---------------------------------------------------------------------------
+  - script: |
+      aws sts get-caller-identity
+    displayName: 'Verify AWS credentials'
+    env:
+      AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+      AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+      AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+      AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+      AWS_PAGER: ""
+
+  # ---------------------------------------------------------------------------
+  # Install kubectl matching the cluster's Kubernetes version
+  # ---------------------------------------------------------------------------
+  - script: |
+      if ! command -v kubectl &>/dev/null; then
+        echo "Installing kubectl..."
+        curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+          -o /usr/local/bin/kubectl
+        chmod +x /usr/local/bin/kubectl
+      fi
+      kubectl version --client
+    displayName: 'Install kubectl'
+
+  # ---------------------------------------------------------------------------
+  # Update kubeconfig for the target EKS cluster.
+  # The generated kubeconfig uses the aws-cli token plugin — no long-lived
+  # kubeconfig credentials are written to disk.
+  # ---------------------------------------------------------------------------
+  - script: |
+      aws eks update-kubeconfig \
+        --region "${{ parameters.awsRegion }}" \
+        --name "${{ parameters.eksClusterName }}" \
+        --kubeconfig "${KUBECONFIG:-$HOME/.kube/config}"
+
+      echo "=== Cluster info ==="
+      kubectl cluster-info
+      echo ""
+      echo "=== Nodes ==="
+      kubectl get nodes -o wide
+    displayName: 'Update kubeconfig for EKS cluster: ${{ parameters.eksClusterName }}'
+    env:
+      AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+      AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+      AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+      AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+      AWS_PAGER: ""
+
+  # ---------------------------------------------------------------------------
+  # Install Helm 3 (optional — skip for jobs that only use kubectl)
+  # ---------------------------------------------------------------------------
+  - ${{ if eq(parameters.installHelm, true) }}:
+    - script: |
+        if ! command -v helm &>/dev/null; then
+          echo "Installing Helm 3..."
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        fi
+        helm version
+      displayName: 'Install Helm 3'

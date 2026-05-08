@@ -1,0 +1,1001 @@
+# =============================================================================
+# Pipeline: Deploy TIBCO Platform Control Plane on EKS
+#
+# Purpose:
+#   Automates the full TIBCO Control Plane deployment described in:
+#   howto/how-to-cp-and-dp-eks-setup-guide.md (Part 8 – Part 9)
+#
+#   This pipeline is idempotent — it can be run for both fresh installs and
+#   upgrades. Existing secrets (session-keys, cporch-encryption-secret) are
+#   preserved on re-runs so active user sessions are not invalidated.
+#
+# Stages:
+#   1. Validate       — preflight checks (cluster access, helm repo, variables)
+#   2. Prerequisites  — namespace, service account, required K8s secrets
+#   3. Deploy         — generate tibco-cp-base values.yaml, helm upgrade --install
+#   4. Verify         — check pod status, print CP access URL
+#
+# Pre-requisites:
+#   1. EKS cluster is running with all dependencies installed:
+#      - AWS Load Balancer Controller, External DNS, EFS CSI driver
+#      - Nginx or Traefik ingress controller
+#      - ACM certificates issued for *.${TP_MY_DOMAIN} and *.${TP_TUNNEL_DOMAIN}
+#      - RDS Aurora PostgreSQL cluster is running
+#      - EFS file system is created and StorageClass exists
+#   2. Run test-postgres-connectivity.yml first to validate DB reachability.
+#   3. Azure DevOps Variable Group "tibco-platform-eks-secrets" containing
+#      the secrets listed in the Variables section below.
+#
+# Variable Groups (Azure DevOps Library):
+#   tibco-platform-eks-secrets — secrets, linked to Azure Key Vault (recommended)
+#     AWS_ACCESS_KEY_ID                IAM access key for EKS/AWS operations
+#     AWS_SECRET_ACCESS_KEY            IAM secret key
+#     AWS_SESSION_TOKEN                (optional) for assumed-role sessions
+#     TP_CONTAINER_REGISTRY_PASSWORD   JFrog Artifactory API key / password
+#     TP_DB_PASSWORD                   Aurora PostgreSQL master password
+#     TP_ADMIN_INITIAL_PASSWORD        Initial CP admin password (min 8 chars)
+#     TP_SMTP_PASSWORD                 (optional) SMTP relay password
+#     TP_SENDGRID_API_KEY              (optional) SendGrid API key
+#
+#   tibco-platform-eks-config — non-secret configuration (plain variable group)
+#     See the variables section below for a complete list.
+#
+# Azure Key Vault integration (recommended for production):
+#   1. Create an Azure Key Vault: az keyvault create --name tibco-platform-kv ...
+#   2. Store each secret: az keyvault secret set --vault-name tibco-platform-kv ...
+#   3. In Azure DevOps Library, create a variable group linked to the Key Vault.
+#   Reference: https://learn.microsoft.com/azure/devops/pipelines/library/variable-groups
+# =============================================================================
+
+trigger: none  # Manual trigger only
+
+# ---------------------------------------------------------------------------
+# Pipeline parameters — override at runtime for each deployment.
+# Default values match the workshop env.sh defaults.
+# ---------------------------------------------------------------------------
+parameters:
+  # --- Cluster ---
+  - name: awsRegion
+    displayName: 'AWS Region'
+    type: string
+    default: 'us-west-2'
+
+  - name: eksClusterName
+    displayName: 'EKS Cluster Name'
+    type: string
+    default: 'eks-cluster-us-west-2'
+
+  - name: kubernetesVersion
+    displayName: 'Kubernetes Version'
+    type: string
+    default: '1.33'
+
+  # --- Helm chart ---
+  - name: helmChartVersion
+    displayName: 'tibco-cp-base chart version constraint (e.g. ^1.0.0)'
+    type: string
+    default: '^1.0.0'
+
+  - name: helmReleaseName
+    displayName: 'Helm release name'
+    type: string
+    default: 'tibco-platform'
+
+  - name: helmTimeout
+    displayName: 'Helm install timeout'
+    type: string
+    default: '1h'
+
+  # --- CP Identity ---
+  - name: cpInstanceId
+    displayName: 'Control Plane Instance ID (max 5 alphanumeric chars)'
+    type: string
+    default: 'cp1'
+
+  # --- Domains ---
+  - name: hostedZoneDomain
+    displayName: 'Route 53 Hosted Zone Domain'
+    type: string
+    default: 'aws.example.com'
+
+  - name: myDomainCertArn
+    displayName: 'ACM Certificate ARN for *.${CP_INSTANCE_ID}-my.${HOSTED_ZONE}'
+    type: string
+    default: ''
+
+  - name: tunnelDomainCertArn
+    displayName: 'ACM Certificate ARN for *.${CP_INSTANCE_ID}-tunnel.${HOSTED_ZONE}'
+    type: string
+    default: ''
+
+  # --- Ingress ---
+  - name: ingressController
+    displayName: 'Kubernetes Ingress Controller (nginx or traefik)'
+    type: string
+    default: 'nginx'
+    values:
+      - nginx
+      - traefik
+
+  # --- Network ---
+  - name: vpcCidr
+    displayName: 'VPC CIDR'
+    type: string
+    default: '10.180.0.0/16'
+
+  - name: serviceCidr
+    displayName: 'Kubernetes Service CIDR'
+    type: string
+    default: '172.20.0.0/16'
+
+  - name: enableNetworkPolicy
+    displayName: 'Enable Kubernetes Network Policies'
+    type: boolean
+    default: true
+
+  # --- Storage ---
+  - name: storageClassEfs
+    displayName: 'EFS Storage Class Name'
+    type: string
+    default: 'efs-sc'
+
+  # --- Container Registry ---
+  - name: containerRegistryUrl
+    displayName: 'TIBCO JFrog Registry URL'
+    type: string
+    default: 'csgprduswrepoedge.jfrog.io'
+
+  - name: containerRegistryUser
+    displayName: 'JFrog Registry Username'
+    type: string
+    default: ''
+
+  # --- Database ---
+  - name: dbHost
+    displayName: 'Aurora PostgreSQL Writer Endpoint'
+    type: string
+    default: ''
+
+  - name: dbName
+    displayName: 'Database Name'
+    type: string
+    default: 'postgres'
+
+  - name: dbPort
+    displayName: 'Database Port'
+    type: string
+    default: '5432'
+
+  - name: dbUsername
+    displayName: 'Database Master Username'
+    type: string
+    default: 'useradmin'
+
+  - name: dbSslMode
+    displayName: 'Database SSL Mode'
+    type: string
+    default: 'disable'
+    values:
+      - disable
+      - require
+      - verify-full
+
+  # --- Email ---
+  - name: emailServerType
+    displayName: 'Email Server Type'
+    type: string
+    default: 'ses'
+    values:
+      - ses
+      - smtp
+      - sendgrid
+      - ''
+
+  - name: fromEmail
+    displayName: 'From Email Address for CP notifications'
+    type: string
+    default: ''
+
+  - name: sesArn
+    displayName: 'SES Identity ARN (for emailServerType=ses)'
+    type: string
+    default: ''
+
+  - name: smtpServer
+    displayName: 'SMTP Server (for emailServerType=smtp)'
+    type: string
+    default: ''
+
+  - name: smtpPort
+    displayName: 'SMTP Port'
+    type: string
+    default: '587'
+
+  - name: smtpUsername
+    displayName: 'SMTP Username'
+    type: string
+    default: ''
+
+  # --- Admin User ---
+  - name: adminEmail
+    displayName: 'Initial Admin Email (login username)'
+    type: string
+    default: ''
+
+  - name: adminFirstname
+    displayName: 'Admin First Name'
+    type: string
+    default: 'Platform'
+
+  - name: adminLastname
+    displayName: 'Admin Last Name'
+    type: string
+    default: 'Admin'
+
+  - name: adminCustomerId
+    displayName: 'Customer ID (for license association, optional)'
+    type: string
+    default: ''
+
+  # --- Proxy (leave empty if not required) ---
+  - name: httpProxy
+    displayName: 'HTTP Proxy URL (empty = no proxy)'
+    type: string
+    default: ''
+
+  - name: httpsProxy
+    displayName: 'HTTPS Proxy URL (empty = no proxy)'
+    type: string
+    default: ''
+
+  - name: noProxy
+    displayName: 'No-proxy list (comma-separated)'
+    type: string
+    default: ''
+
+  # --- Log Server (optional) ---
+  - name: logserverEndpoint
+    displayName: 'Log server endpoint (empty = disabled)'
+    type: string
+    default: ''
+
+  - name: logserverIndex
+    displayName: 'Log server index name'
+    type: string
+    default: ''
+
+  - name: logserverUsername
+    displayName: 'Log server username'
+    type: string
+    default: ''
+
+variables:
+  # Secret variables — must be defined in the variable group linked to Key Vault
+  - group: tibco-platform-eks-secrets
+
+  # Derived variables
+  - name: cpNamespace
+    value: '${{ parameters.cpInstanceId }}-ns'
+  - name: cpServiceAccount
+    value: '${{ parameters.cpInstanceId }}-sa'
+  - name: myDomain
+    value: '${{ parameters.cpInstanceId }}-my.${{ parameters.hostedZoneDomain }}'
+  - name: tunnelDomain
+    value: '${{ parameters.cpInstanceId }}-tunnel.${{ parameters.hostedZoneDomain }}'
+  - name: tibcoHelmRepo
+    value: 'https://tibcosoftware.github.io/tp-helm-charts'
+  - name: valuesFile
+    value: '$(Agent.TempDirectory)/tibco-cp-base-values.yaml'
+
+# =============================================================================
+# STAGE 1: Validate — preflight checks before any changes are made
+# =============================================================================
+stages:
+  - stage: Validate
+    displayName: 'Stage 1: Validate Prerequisites'
+    jobs:
+      - job: PreflightChecks
+        displayName: 'Preflight Checks'
+        pool:
+          vmImage: 'ubuntu-latest'
+        timeoutInMinutes: 10
+
+        steps:
+          - checkout: none
+
+          - template: templates/aws-eks-setup-steps.yml
+            parameters:
+              awsRegion: ${{ parameters.awsRegion }}
+              eksClusterName: ${{ parameters.eksClusterName }}
+              installHelm: true
+
+          - script: |
+              set -euo pipefail
+
+              echo "=== Validating Required Parameters ==="
+              ERRORS=0
+
+              check_required() {
+                local name="$1"
+                local value="$2"
+                if [ -z "${value}" ]; then
+                  echo "  ERROR: ${name} is required but not set"
+                  ERRORS=$((ERRORS + 1))
+                else
+                  echo "  OK: ${name} = ${value}"
+                fi
+              }
+
+              check_required "dbHost"              "${{ parameters.dbHost }}"
+              check_required "adminEmail"          "${{ parameters.adminEmail }}"
+              check_required "fromEmail"           "${{ parameters.fromEmail }}"
+              check_required "containerRegistryUser" "${{ parameters.containerRegistryUser }}"
+              check_required "myDomainCertArn"     "${{ parameters.myDomainCertArn }}"
+              check_required "tunnelDomainCertArn" "${{ parameters.tunnelDomainCertArn }}"
+
+              if [ ${ERRORS} -gt 0 ]; then
+                echo ""
+                echo "ERROR: ${ERRORS} required parameter(s) are missing."
+                echo "Set them as pipeline parameters or in the tibco-platform-eks-config variable group."
+                exit 1
+              fi
+              echo ""
+              echo "All required parameters are set."
+            displayName: 'Validate required parameters'
+
+          - script: |
+              set -euo pipefail
+
+              echo "=== Checking TIBCO Helm Chart Repository ==="
+              helm repo add tibco "${{ variables.tibcoHelmRepo }}" 2>/dev/null || \
+                helm repo add tibco "${{ variables.tibcoHelmRepo }}"
+              helm repo update tibco
+              helm search repo tibco/tibco-cp-base --versions | head -5
+              echo "Helm repo is accessible."
+            displayName: 'Verify TIBCO Helm chart repo'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          - script: |
+              set -euo pipefail
+
+              echo "=== Checking EKS Cluster Readiness ==="
+              echo "Nodes:"
+              kubectl get nodes -o wide
+              echo ""
+
+              echo "Ingress Classes:"
+              kubectl get ingressclass 2>/dev/null || echo "No ingress classes found"
+              echo ""
+
+              echo "Storage Classes:"
+              kubectl get storageclass
+              echo ""
+
+              # Verify the expected EFS storage class exists
+              EFS_SC="${{ parameters.storageClassEfs }}"
+              if kubectl get storageclass "${EFS_SC}" &>/dev/null; then
+                echo "OK: EFS StorageClass '${EFS_SC}' exists"
+              else
+                echo "WARNING: EFS StorageClass '${EFS_SC}' not found — ensure EFS CSI driver is installed"
+                echo "  See Part 6 of howto/how-to-cp-and-dp-eks-setup-guide.md"
+              fi
+
+              # Verify the expected ingress class exists
+              INGRESS_CLASS="${{ parameters.ingressController }}"
+              if kubectl get ingressclass "${INGRESS_CLASS}" &>/dev/null; then
+                echo "OK: IngressClass '${INGRESS_CLASS}' exists"
+              else
+                echo "WARNING: IngressClass '${INGRESS_CLASS}' not found — ensure Nginx/Traefik is installed"
+                echo "  See Part 8 of howto/how-to-cp-and-dp-eks-setup-guide.md"
+              fi
+            displayName: 'Verify cluster readiness (nodes, ingress, storage)'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+  # =============================================================================
+  # STAGE 2: Prerequisites — namespace, service account, K8s secrets
+  # All steps use --ignore-not-found or check for existence first, making
+  # this stage safe to re-run on upgrades.
+  # =============================================================================
+  - stage: Prerequisites
+    displayName: 'Stage 2: Create Prerequisites'
+    dependsOn: Validate
+    jobs:
+      - job: SetupPrerequisites
+        displayName: 'Create Namespace, Service Account, and Secrets'
+        pool:
+          vmImage: 'ubuntu-latest'
+        timeoutInMinutes: 10
+
+        steps:
+          - checkout: none
+
+          - template: templates/aws-eks-setup-steps.yml
+            parameters:
+              awsRegion: ${{ parameters.awsRegion }}
+              eksClusterName: ${{ parameters.eksClusterName }}
+              installHelm: false
+
+          # ------------------------------------------------------------------
+          # Create the CP namespace with the required label.
+          # The label is used by network policies to identify the CP namespace.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              NS="$(cpNamespace)"
+              CP_ID="${{ parameters.cpInstanceId }}"
+
+              if kubectl get namespace "${NS}" &>/dev/null; then
+                echo "Namespace '${NS}' already exists — skipping creation."
+                kubectl get namespace "${NS}" --show-labels
+              else
+                echo "Creating namespace '${NS}'..."
+                kubectl create namespace "${NS}"
+                kubectl label namespace "${NS}" \
+                  "platform.tibco.com/controlplane-instance-id=${CP_ID}"
+                echo "Namespace created and labeled."
+              fi
+            displayName: 'Create CP namespace: $(cpNamespace)'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Create the IRSA service account.
+          # If using Crossplane, this was already created by the claim — skip.
+          # If using CLI method, create it here.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              NS="$(cpNamespace)"
+              SA="$(cpServiceAccount)"
+
+              if kubectl get serviceaccount "${SA}" -n "${NS}" &>/dev/null; then
+                echo "ServiceAccount '${SA}' already exists — skipping creation."
+              else
+                echo "Creating ServiceAccount '${SA}' in namespace '${NS}'..."
+                kubectl create serviceaccount "${SA}" -n "${NS}"
+                echo "ServiceAccount created."
+              fi
+            displayName: 'Create CP service account: $(cpServiceAccount)'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Create session-keys secret.
+          #
+          # IMPORTANT: This secret must NOT be regenerated on upgrades.
+          # If TSC_SESSION_KEY or DOMAIN_SESSION_KEY change, all active user
+          # sessions are immediately invalidated. The pipeline checks for
+          # existence before creating — if it already exists, it is preserved.
+          #
+          # For disaster recovery: store the generated keys in Azure Key Vault
+          # after the first run so they can be restored if the cluster is rebuilt.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              NS="$(cpNamespace)"
+              SECRET_NAME="session-keys"
+
+              if kubectl get secret "${SECRET_NAME}" -n "${NS}" &>/dev/null; then
+                echo "Secret '${SECRET_NAME}' already exists — preserving existing keys."
+                echo "NOTE: Existing sessions will remain valid."
+              else
+                echo "Generating new session keys..."
+                TSC_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
+                DOMAIN_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
+
+                kubectl create secret generic "${SECRET_NAME}" -n "${NS}" \
+                  --from-literal=TSC_SESSION_KEY="${TSC_SESSION_KEY}" \
+                  --from-literal=DOMAIN_SESSION_KEY="${DOMAIN_SESSION_KEY}"
+
+                echo "Secret '${SECRET_NAME}' created."
+                echo ""
+                echo "IMPORTANT: Store these keys in Azure Key Vault for disaster recovery:"
+                echo "  az keyvault secret set --vault-name <YOUR_KV> --name tsc-session-key --value <KEY>"
+                echo "  az keyvault secret set --vault-name <YOUR_KV> --name domain-session-key --value <KEY>"
+              fi
+            displayName: 'Create session-keys secret (skip if exists)'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Create cporch-encryption-secret.
+          #
+          # IMPORTANT: This key encrypts CP data written to the database.
+          # If it changes after initial deployment, the orchestrator cannot
+          # decrypt previously stored Data Plane credentials and connection
+          # strings — the CP will lose connectivity to registered Data Planes.
+          # Like session-keys, this is preserved on re-runs.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+              NS="$(cpNamespace)"
+              SECRET_NAME="cporch-encryption-secret"
+
+              if kubectl get secret "${SECRET_NAME}" -n "${NS}" &>/dev/null; then
+                echo "Secret '${SECRET_NAME}' already exists — preserving existing encryption key."
+              else
+                echo "Generating new encryption key..."
+                CP_ENCRYPTION_SECRET=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c44)
+
+                kubectl create secret generic "${SECRET_NAME}" -n "${NS}" \
+                  --from-literal=CP_ENCRYPTION_SECRET="${CP_ENCRYPTION_SECRET}"
+
+                echo "Secret '${SECRET_NAME}' created."
+                echo ""
+                echo "IMPORTANT: Store this key in Azure Key Vault for disaster recovery:"
+                echo "  az keyvault secret set --vault-name <YOUR_KV> --name cp-encryption-secret --value <KEY>"
+              fi
+            displayName: 'Create cporch-encryption-secret (skip if exists)'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          # ------------------------------------------------------------------
+          # Optional: Create RDS CA certificate secret for verify-full SSL mode.
+          # Downloads the AWS regional CA bundle and stores it as a K8s secret.
+          # Skipped unless dbSslMode = "verify-full".
+          # ------------------------------------------------------------------
+          - ${{ if eq(parameters.dbSslMode, 'verify-full') }}:
+            - script: |
+                set -euo pipefail
+                NS="$(cpNamespace)"
+                SECRET_NAME="rds-ca-cert"
+                REGION="${{ parameters.awsRegion }}"
+
+                if kubectl get secret "${SECRET_NAME}" -n "${NS}" &>/dev/null; then
+                  echo "Secret '${SECRET_NAME}' already exists — skipping download."
+                else
+                  echo "Downloading AWS RDS CA bundle for region: ${REGION}"
+                  curl -fsSL "https://truststore.pki.rds.amazonaws.com/${REGION}/${REGION}-bundle.pem" \
+                    -o /tmp/rds-ca-bundle.pem
+
+                  echo "Certificate bundle downloaded ($(wc -l < /tmp/rds-ca-bundle.pem) lines)"
+                  echo "Creating Kubernetes secret '${SECRET_NAME}'..."
+
+                  kubectl create secret generic "${SECRET_NAME}" -n "${NS}" \
+                    --from-file=rds-ca-bundle.pem=/tmp/rds-ca-bundle.pem
+
+                  rm -f /tmp/rds-ca-bundle.pem
+                  echo "Secret '${SECRET_NAME}' created."
+                fi
+              displayName: 'Create RDS CA cert secret (verify-full mode only)'
+              env:
+                AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+                AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+                AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+                AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+  # =============================================================================
+  # STAGE 3: Deploy — generate values.yaml and run helm upgrade --install
+  # =============================================================================
+  - stage: Deploy
+    displayName: 'Stage 3: Deploy TIBCO Control Plane'
+    dependsOn: Prerequisites
+    jobs:
+      - job: HelmDeploy
+        displayName: 'Helm Deploy tibco-cp-base'
+        pool:
+          vmImage: 'ubuntu-latest'
+        timeoutInMinutes: 90  # tibco-cp-base can take 30-60 min on first install
+
+        steps:
+          - checkout: none
+
+          - template: templates/aws-eks-setup-steps.yml
+            parameters:
+              awsRegion: ${{ parameters.awsRegion }}
+              eksClusterName: ${{ parameters.eksClusterName }}
+              installHelm: true
+
+          # ------------------------------------------------------------------
+          # Generate the tibco-cp-base values YAML file.
+          #
+          # Why use envsubst vs inline parameters:
+          # - A values file is auditable (printed to pipeline logs below)
+          # - It matches the workshop guide, making manual/pipeline steps equivalent
+          # - envsubst handles multiline and special-character substitution safely
+          #
+          # Secret values (TP_DB_PASSWORD, TP_CONTAINER_REGISTRY_PASSWORD,
+          # TP_ADMIN_INITIAL_PASSWORD) are passed as environment variables so
+          # Azure DevOps masks them in the log output.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+
+              VALUES_FILE="$(valuesFile)"
+
+              # Compute derived values
+              CP_ID="${{ parameters.cpInstanceId }}"
+              MY_DOMAIN="${CP_ID}-my.${{ parameters.hostedZoneDomain }}"
+              TUNNEL_DOMAIN="${CP_ID}-tunnel.${{ parameters.hostedZoneDomain }}"
+
+              # Determine SSL root cert path for verify-full mode
+              DB_SSL_ROOT_CERT=""
+              if [ "${{ parameters.dbSslMode }}" = "verify-full" ]; then
+                DB_SSL_ROOT_CERT="/etc/ssl/certs/rds-ca-bundle.pem"
+              fi
+
+              # Determine if network policy is enabled
+              NP_ENABLED="${{ parameters.enableNetworkPolicy }}"
+
+              cat > "${VALUES_FILE}" << HELMEOF
+              # tibco-cp-base values — generated by Azure DevOps pipeline
+              # Generated: $(date -u)
+              # Cluster:   ${{ parameters.eksClusterName }}
+              # CP ID:     ${CP_ID}
+
+              # =================================================================
+              # SECTION 1: ROUTER INGRESS
+              # =================================================================
+              router-operator:
+                tscSessionKey:
+                  secretName: session-keys
+                  key: TSC_SESSION_KEY
+                domainSessionKey:
+                  secretName: session-keys
+                  key: DOMAIN_SESSION_KEY
+                ingress:
+                  enabled: true
+                  ingressClassName: "${{ parameters.ingressController }}"
+                  hosts:
+                    - host: "*.${MY_DOMAIN}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+                          port: 100
+
+              # =================================================================
+              # SECTION 2: HYBRID PROXY
+              # =================================================================
+              hybrid-proxy:
+                enabled: true
+                # Option A: Use existing Nginx/Traefik Ingress (default)
+                # The tunnel Ingress was created in Part 8 (dp-config-aws-tunnel).
+                # Uncomment the service block below for Option B (dedicated NLB):
+                # service:
+                #   type: LoadBalancer
+                #   loadBalancerClass: "service.k8s.aws/nlb"
+                #   allocateLoadBalancerNodePorts: false
+                #   annotations:
+                #     external-dns.alpha.kubernetes.io/hostname: "*.${TUNNEL_DOMAIN}"
+                #     service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "${{ parameters.tunnelDomainCertArn }}"
+                #     service.beta.kubernetes.io/aws-load-balancer-type: external
+                #     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+                #     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+
+              global:
+                tibco:
+                  # =============================================================
+                  # SECTION 3: CORE PLATFORM IDENTITY
+                  # =============================================================
+                  controlPlaneInstanceId: "${CP_ID}"
+                  serviceAccount: "${CP_ID}-sa"
+
+                  # =============================================================
+                  # SECTION 4: CONTAINER REGISTRY
+                  # =============================================================
+                  containerRegistry:
+                    url: "${{ parameters.containerRegistryUrl }}"
+                    username: "${TP_CONTAINER_REGISTRY_USER}"
+                    password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
+                    repository: "tibco-platform-docker-prod"
+
+                  # =============================================================
+                  # SECTION 5: NETWORK POLICY
+                  # =============================================================
+                  createNetworkPolicy: ${NP_ENABLED}
+                  networkPolicy:
+                    database:
+                      CIDR: "${{ parameters.vpcCidr }}"
+                      port: "${{ parameters.dbPort }}"
+                    logServer:
+                      CIDR: ""
+                      port: "9200"
+                    emailServer:
+                      CIDR: ""
+                      port: "${{ parameters.smtpPort }}"
+                    containerRegistry:
+                      CIDR: ""
+                      port: "443"
+
+                  # =============================================================
+                  # SECTION 6: PROXY (leave empty if no proxy)
+                  # =============================================================
+                  proxy:
+                    httpProxy: "${{ parameters.httpProxy }}"
+                    httpsProxy: "${{ parameters.httpsProxy }}"
+                    noProxy: "${{ parameters.noProxy }}"
+
+                  # =============================================================
+                  # SECTION 7: FLUENT BIT LOGGING
+                  # =============================================================
+                  logging:
+                    fluentbit:
+                      enabled: false
+
+                external:
+                  # =============================================================
+                  # SECTION 8: CLUSTER NETWORK TOPOLOGY
+                  # =============================================================
+                  clusterInfo:
+                    nodeCIDR: "${{ parameters.vpcCidr }}"
+                    podCIDR: "${{ parameters.vpcCidr }}"
+                    serviceCIDR: "${{ parameters.serviceCidr }}"
+
+                  # =============================================================
+                  # SECTION 9: DOMAIN CONFIGURATION
+                  # =============================================================
+                  dnsDomain: "${MY_DOMAIN}"
+                  dnsTunnelDomain: "${TUNNEL_DOMAIN}"
+
+                  # =============================================================
+                  # SECTION 10: DATABASE
+                  # =============================================================
+                  db_host: "${{ parameters.dbHost }}"
+                  db_master_writer_host: "${{ parameters.dbHost }}"
+                  db_local_reader_host: "${{ parameters.dbHost }}"
+                  db_name: "${{ parameters.dbName }}"
+                  db_port: "${{ parameters.dbPort }}"
+                  db_username: "${{ parameters.dbUsername }}"
+                  db_password: "${TP_DB_PASSWORD}"
+                  db_secret_name: ""
+                  db_ssl_mode: "${{ parameters.dbSslMode }}"
+              HELMEOF
+
+              # Append SSL root cert if verify-full mode
+              if [ -n "${DB_SSL_ROOT_CERT}" ]; then
+                echo "              db_ssl_root_cert: \"${DB_SSL_ROOT_CERT}\"" >> "${VALUES_FILE}"
+              fi
+
+              # Append remaining sections
+              cat >> "${VALUES_FILE}" << HELMEOF2
+
+                  # =============================================================
+                  # SECTION 11: EMAIL CONFIGURATION
+                  # =============================================================
+                  emailServerType: "${{ parameters.emailServerType }}"
+                  fromAndReplyToEmailAddress: "${{ parameters.fromEmail }}"
+                  emailServer:
+                    ses:
+                      arn: "${{ parameters.sesArn }}"
+                    smtp:
+                      server: "${{ parameters.smtpServer }}"
+                      port: "${{ parameters.smtpPort }}"
+                      username: "${{ parameters.smtpUsername }}"
+                      password: "${TP_SMTP_PASSWORD}"
+                    sendgrid:
+                      apiKey: "${TP_SENDGRID_API_KEY}"
+
+                  # =============================================================
+                  # SECTION 12: INITIAL ADMIN USER
+                  # =============================================================
+                  admin:
+                    email: "${{ parameters.adminEmail }}"
+                    firstname: "${{ parameters.adminFirstname }}"
+                    lastname: "${{ parameters.adminLastname }}"
+                    customerID: "${{ parameters.adminCustomerId }}"
+                  adminInitialPassword: "${TP_ADMIN_INITIAL_PASSWORD}"
+
+                  # =============================================================
+                  # SECTION 13: STORAGE
+                  # =============================================================
+                  storage:
+                    storageClassName: "${{ parameters.storageClassEfs }}"
+
+                  # =============================================================
+                  # SECTION 14: LOG SERVER
+                  # =============================================================
+                  logserver:
+                    endpoint: "${{ parameters.logserverEndpoint }}"
+                    index: "${{ parameters.logserverIndex }}"
+                    username: "${{ parameters.logserverUsername }}"
+                    password: "${TP_LOGSERVER_PASSWORD}"
+              HELMEOF2
+
+              # Append verify-full SSL volume mounts if needed
+              if [ "${{ parameters.dbSslMode }}" = "verify-full" ]; then
+                cat >> "${VALUES_FILE}" << HELMEOF3
+
+              # =================================================================
+              # SECTION 15: SSL CERTIFICATE VOLUME MOUNTS (verify-full only)
+              # Mounts the rds-ca-cert secret into orchestrator pods so the
+              # postgres driver can verify the Aurora server certificate.
+              # =================================================================
+              tp-cp-core:
+                orchestrator:
+                  extraVolumes:
+                    - name: rds-ca-cert
+                      secret:
+                        secretName: rds-ca-cert
+                  extraVolumeMounts:
+                    - name: rds-ca-cert
+                      mountPath: /etc/ssl/certs
+                      readOnly: true
+              HELMEOF3
+              fi
+
+              echo "=== Generated Values File (secrets masked) ==="
+              # Print the values file but mask secret values
+              sed 's/password: ".*"/password: "***MASKED***"/g;s/apiKey: ".*"/apiKey: "***MASKED***"/g' "${VALUES_FILE}"
+            displayName: 'Generate tibco-cp-base values file'
+            env:
+              TP_CONTAINER_REGISTRY_USER: ${{ parameters.containerRegistryUser }}
+              TP_CONTAINER_REGISTRY_PASSWORD: $(TP_CONTAINER_REGISTRY_PASSWORD)
+              TP_DB_PASSWORD: $(TP_DB_PASSWORD)
+              TP_ADMIN_INITIAL_PASSWORD: $(TP_ADMIN_INITIAL_PASSWORD)
+              TP_SMTP_PASSWORD: $(TP_SMTP_PASSWORD)
+              TP_SENDGRID_API_KEY: $(TP_SENDGRID_API_KEY)
+              TP_LOGSERVER_PASSWORD: $(TP_LOGSERVER_PASSWORD)
+
+          # ------------------------------------------------------------------
+          # Add the TIBCO Helm chart repository and run helm upgrade --install.
+          #
+          # Why --install: makes the command idempotent (creates on first run,
+          # upgrades on subsequent runs).
+          # Why --wait: blocks until all Deployment pods reach Ready state,
+          # so the pipeline fails immediately if a pod crashes rather than
+          # leaving a partially-deployed CP.
+          # ------------------------------------------------------------------
+          - script: |
+              set -euo pipefail
+
+              NS="$(cpNamespace)"
+              RELEASE="${{ parameters.helmReleaseName }}"
+              VALUES_FILE="$(valuesFile)"
+
+              echo "Adding TIBCO Helm chart repository..."
+              helm repo add tibco "$(tibcoHelmRepo)" 2>/dev/null || \
+                helm repo add tibco "$(tibcoHelmRepo)"
+              helm repo update tibco
+
+              echo ""
+              echo "=== Helm Deploy: tibco-cp-base ==="
+              echo "  Release:    ${RELEASE}"
+              echo "  Namespace:  ${NS}"
+              echo "  Version:    ${{ parameters.helmChartVersion }}"
+              echo "  Timeout:    ${{ parameters.helmTimeout }}"
+              echo ""
+
+              helm upgrade --install \
+                --wait \
+                --timeout "${{ parameters.helmTimeout }}" \
+                --create-namespace \
+                --namespace "${NS}" \
+                "${RELEASE}" tibco/tibco-cp-base \
+                --version "${{ parameters.helmChartVersion }}" \
+                --values "${VALUES_FILE}"
+
+              echo ""
+              echo "=== Helm Release Status ==="
+              helm status "${RELEASE}" -n "${NS}"
+            displayName: 'helm upgrade --install tibco-cp-base'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+  # =============================================================================
+  # STAGE 4: Verify — post-deployment health checks
+  # =============================================================================
+  - stage: Verify
+    displayName: 'Stage 4: Verify Deployment'
+    dependsOn: Deploy
+    jobs:
+      - job: VerifyDeployment
+        displayName: 'Post-Deployment Verification'
+        pool:
+          vmImage: 'ubuntu-latest'
+        timeoutInMinutes: 15
+
+        steps:
+          - checkout: none
+
+          - template: templates/aws-eks-setup-steps.yml
+            parameters:
+              awsRegion: ${{ parameters.awsRegion }}
+              eksClusterName: ${{ parameters.eksClusterName }}
+              installHelm: true
+
+          - script: |
+              set -euo pipefail
+
+              NS="$(cpNamespace)"
+              CP_ID="${{ parameters.cpInstanceId }}"
+              MY_DOMAIN="${CP_ID}-my.${{ parameters.hostedZoneDomain }}"
+              RELEASE="${{ parameters.helmReleaseName }}"
+
+              echo "=== Pod Status in ${NS} ==="
+              kubectl get pods -n "${NS}" -o wide
+              echo ""
+
+              echo "=== Deployment Status ==="
+              kubectl get deployments -n "${NS}"
+              echo ""
+
+              echo "=== Services ==="
+              kubectl get services -n "${NS}"
+              echo ""
+
+              echo "=== Ingresses ==="
+              kubectl get ingress -n "${NS}" 2>/dev/null || echo "No ingresses found"
+              echo ""
+
+              echo "=== Helm Release ==="
+              helm status "${RELEASE}" -n "${NS}"
+              echo ""
+
+              # Check for pods not in Running/Completed state
+              NOT_READY=$(kubectl get pods -n "${NS}" \
+                --no-headers \
+                -o custom-columns=':status.phase' \
+                2>/dev/null | grep -v -E '^(Running|Succeeded)$' | wc -l)
+
+              if [ "${NOT_READY}" -gt 0 ]; then
+                echo "WARNING: ${NOT_READY} pod(s) are not yet Running."
+                echo "This may be normal during initial image pull — check again in a few minutes."
+                kubectl get pods -n "${NS}" | grep -v -E 'Running|Completed'
+              else
+                echo "All pods are Running."
+              fi
+            displayName: 'Check pod and deployment status'
+            env:
+              AWS_DEFAULT_REGION: ${{ parameters.awsRegion }}
+              AWS_ACCESS_KEY_ID: $(AWS_ACCESS_KEY_ID)
+              AWS_SECRET_ACCESS_KEY: $(AWS_SECRET_ACCESS_KEY)
+              AWS_SESSION_TOKEN: $(AWS_SESSION_TOKEN)
+
+          - script: |
+              set -euo pipefail
+
+              CP_ID="${{ parameters.cpInstanceId }}"
+              MY_DOMAIN="${CP_ID}-my.${{ parameters.hostedZoneDomain }}"
+
+              echo "============================================================"
+              echo "TIBCO Control Plane Deployment Complete"
+              echo "============================================================"
+              echo ""
+              echo "  CP Instance ID : ${CP_ID}"
+              echo "  Namespace      : $(cpNamespace)"
+              echo "  Cluster        : ${{ parameters.eksClusterName }}"
+              echo "  Region         : ${{ parameters.awsRegion }}"
+              echo ""
+              echo "  Access URLs:"
+              echo "    CP UI       : https://${MY_DOMAIN}"
+              echo "    TSC UI      : https://tsc.${MY_DOMAIN}"
+              echo ""
+              echo "  Admin Login:"
+              echo "    Email    : ${{ parameters.adminEmail }}"
+              echo "    Password : <set in pipeline secret TP_ADMIN_INITIAL_PASSWORD>"
+              echo ""
+              echo "  Next Steps:"
+              echo "    1. Log in to the CP UI at https://${MY_DOMAIN}"
+              echo "    2. Change the admin password on first login"
+              echo "    3. Register a Data Plane via: howto/how-to-dp-eks-setup-guide.md"
+              echo "    4. Configure observability: howto/how-to-dp-eks-observability.md"
+              echo ""
+              echo "  Important — Backup these secrets to Azure Key Vault:"
+              echo "    - session-keys (invalidates all user sessions if lost)"
+              echo "    - cporch-encryption-secret (breaks Data Plane connectivity if lost)"
+              echo ""
+              echo "============================================================"
+            displayName: 'Print deployment summary and next steps'
