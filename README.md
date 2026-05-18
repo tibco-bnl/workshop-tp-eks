@@ -1,8 +1,8 @@
 # TIBCO Platform on Amazon Elastic Kubernetes Service (EKS) Workshop
 
-> **Current Release:** [v1.16.0](./releases/v1.16.0) | **TIBCO Platform CP Version:** 1.16.0  
+> **Current Release:** [v1.17.0](./releases/v1.17.0) | **TIBCO Platform CP Version:** 1.17.0  
 > 📋 **Release History:** See `releases` folder for all versions  
-> 🔄 **Upgrading from 1.15.0?** See the [1.16.0 Release Notes](./releases/v1.16.0#upgrade-path-from-v1150)
+> 🔄 **Upgrading from 1.16.0?** See the [1.17.0 Release Notes](./releases/v1.17.0#upgrade-path)
 
 This repository provides comprehensive guides and resources for deploying **TIBCO Platform** on **Amazon Elastic Kubernetes Service (EKS)** clusters. It covers multiple deployment scenarios from basic EKS cluster setup to full Control Plane and Data Plane deployments with observability.
 
@@ -10,14 +10,20 @@ This repository provides comprehensive guides and resources for deploying **TIBC
 
 **⚠️ Important:** Choose the appropriate documentation version for your deployment:
 
-### 🌟 Version 1.16.0 (Current - Recommended for New Deployments)
+### 🌟 Version 1.17.0 (Current - Recommended for New Deployments)
+- ✅ **Simplified DNS**: Single base domain for admin, subscription, and tunnel — one ACM cert, simpler setup
+- ✅ **Optional Hybrid-Proxy**: Disable hybrid-proxy when not needed to save ~50% CPU/RAM
+- ✅ **Enhanced OTEL**: OpenTelemetry Collector 0.140.0 with centralized fluent-bit configuration
+- ✅ **BW5CE/BWCE V2 Jobs**: Parallel provisioner job templates for faster capability bootstrapping
+- ✅ **Updated Components**: Prometheus v3.5.2, Alertmanager v0.32.0, dp-config-aws 1.17.x
+- 📘 [Setup Guide: CP + DP (v1.17)](./howto/how-to-cp-and-dp-eks-setup-guide)
+- 📋 [Release Notes (v1.17.0)](./releases/v1.17.0)
+
+### Version 1.16.0 (Previous)
 - ✅ **License Management**: View details and receive expiration notifications (90/30/7 days)
 - ✅ **BW6 AI Plugin 6.0.0**: RAG (Retrieval-Augmented Generation) capabilities (Preview)
 - ✅ **Enhanced Monitoring**: Historical logs, audit history, and metrics charts for BW5
 - ✅ **Flogo Init/Sidecar**: Support for init and sidecar containers in deployments
-- ✅ **Developer Hub URL**: Update Developer Hub URL through UI with ingress flexibility
-- 📘 [Setup Guide: CP + DP (v1.16)](./howto/how-to-cp-and-dp-eks-setup-guide)
-- 📘 [Quick Reference (v1.16)](./howto/v1.16/QUICK-REFERENCE)
 - 📋 [Release Notes (v1.16.0)](./releases/v1.16.0)
 
 ---
@@ -37,17 +43,15 @@ Configure comprehensive monitoring and logging using Prometheus and Elastic Stac
 
 ### 🏗️ Version-Specific Setup Guides
 
-#### Version 1.16.0 (Current Release)
+#### Version 1.17.0 (Current Release)
 
-**[📖 How to Set Up EKS Cluster with Control Plane and Data Plane (v1.16)](./howto/how-to-cp-and-dp-eks-setup-guide)**
-- 🎯 **Scope**: Complete TIBCO Platform 1.16.0 deployment on EKS including cluster creation
-- 🔧 **New Features**: eksctl-based cluster setup, AWS EFS/RDS provisioning, ALB ingress, Crossplane support
+**[📖 How to Set Up EKS Cluster with Control Plane and Data Plane (v1.17)](./howto/how-to-cp-and-dp-eks-setup-guide)**
+- 🎯 **Scope**: Complete TIBCO Platform 1.17.0 deployment on EKS including cluster creation
+- 🔧 **New Features**: Simplified DNS structure, optional hybrid-proxy, enhanced OTEL, BW5CE V2 job templates
 - ⏱️ **Duration**: 3-5 hours (including EKS cluster creation ~30 min)
 
-**[📖 Quick Reference Guide (v1.16)](./howto/v1.16/QUICK-REFERENCE)**
-- 🎯 **Scope**: Quick reference for v1.16.0 configuration and commands on EKS
-- 🔧 **Features**: Essential commands, URLs, troubleshooting tips
-- ⏱️ **Duration**: Quick lookup
+**[📖 Release Notes (v1.17.0)](./releases/v1.17.0)**
+- 🎯 **Scope**: What's new, breaking changes, and upgrade path from 1.16.0
 
 ### 🔍 Shared Documentation (Compatible with Both Scenarios)
 

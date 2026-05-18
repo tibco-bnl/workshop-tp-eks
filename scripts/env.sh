@@ -169,14 +169,47 @@ export TP_CONTAINER_REGISTRY_PASSWORD=""                        # JFrog password
 # Reference: https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
 
 export CP_INSTANCE_ID="cp1"                  # Unique ID for this CP installation (max 5 alphanumeric chars)
-export TP_MY_DOMAIN="${CP_INSTANCE_ID}-my.${TP_HOSTED_ZONE_DOMAIN}"         # CP application domain
-export TP_TUNNEL_DOMAIN="${CP_INSTANCE_ID}-tunnel.${TP_HOSTED_ZONE_DOMAIN}" # CP hybrid connectivity domain
 
-# ACM certificate ARNs for CP domains
-# Create wildcard certificates in ACM for *.${TP_MY_DOMAIN} and *.${TP_TUNNEL_DOMAIN}
-# Reference: https://docs.aws.amazon.com/acm/latest/userguide/gs-acm-request-public.html
-export TP_MY_DOMAIN_CERT_ARN=""              # ACM cert ARN for *.${TP_MY_DOMAIN}
-export TP_TUNNEL_DOMAIN_CERT_ARN=""          # ACM cert ARN for *.${TP_TUNNEL_DOMAIN}
+# =============================================================================
+# CONTROL PLANE DNS — Choose ONE approach and uncomment the relevant block
+# =============================================================================
+
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 1: Simplified DNS Structure (RECOMMENDED for v1.17.0+)              │
+# │ Single base domain — admin, subscription, and tunnel share one domain       │
+# │ One wildcard ACM certificate covers all CP subdomains                       │
+# │ Simpler setup: fewer certs, fewer DNS records, lower resource usage         │
+# └─────────────────────────────────────────────────────────────────────────────┘
+# Results in:
+#   Admin UI      : https://admin.${TP_HOSTED_ZONE_DOMAIN}
+#   Subscription  : https://dev.${TP_HOSTED_ZONE_DOMAIN}
+#   Tunnel        : https://tunnel.${TP_HOSTED_ZONE_DOMAIN}  (if hybrid enabled)
+#   ACM cert      : *.${TP_HOSTED_ZONE_DOMAIN}  (single wildcard)
+
+export TP_BASE_DNS_DOMAIN="${TP_HOSTED_ZONE_DOMAIN}"  # Base domain for all CP services
+export CP_ADMIN_HOST_PREFIX="admin"                   # Admin UI hostname prefix
+export CP_SUBSCRIPTION="dev"                          # Subscription portal hostname prefix
+export CP_HYBRID_CONNECTIVITY="true"                  # Set "false" to disable hybrid-proxy (saves resources)
+
+# Single ACM wildcard cert covering all CP subdomains (*.${TP_BASE_DNS_DOMAIN})
+export TP_BASE_DOMAIN_CERT_ARN=""                     # ACM cert ARN for *.${TP_BASE_DNS_DOMAIN}
+
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ OPTION 2: Legacy Multi-Level DNS Structure (Backward Compatible)            │
+# │ Multi-level subdomain: admin.cp1-my.aws.example.com                         │
+# │ Use when: upgrading from v1.14.x, or running multiple CP instances          │
+# └─────────────────────────────────────────────────────────────────────────────┘
+# Results in:
+#   Admin UI      : https://admin.cp1-my.${TP_HOSTED_ZONE_DOMAIN}
+#   Subscription  : https://<sub>.cp1-my.${TP_HOSTED_ZONE_DOMAIN}
+#   Tunnel        : https://<sub>.cp1-tunnel.${TP_HOSTED_ZONE_DOMAIN}
+#   ACM certs     : *.cp1-my.${TP_HOSTED_ZONE_DOMAIN} and *.cp1-tunnel.${TP_HOSTED_ZONE_DOMAIN}
+
+# Uncomment these and comment out Option 1 above to use legacy DNS:
+# export TP_MY_DOMAIN="${CP_INSTANCE_ID}-my.${TP_HOSTED_ZONE_DOMAIN}"         # CP application domain
+# export TP_TUNNEL_DOMAIN="${CP_INSTANCE_ID}-tunnel.${TP_HOSTED_ZONE_DOMAIN}" # CP hybrid connectivity domain
+# export TP_MY_DOMAIN_CERT_ARN=""    # ACM cert ARN for *.${TP_MY_DOMAIN}
+# export TP_TUNNEL_DOMAIN_CERT_ARN="" # ACM cert ARN for *.${TP_TUNNEL_DOMAIN}
 
 
 # =============================================================================
@@ -371,15 +404,21 @@ export TP_NO_PROXY=""                         # Comma-separated no-proxy list (e
 # export KUBECONFIG="$(pwd)/${TP_CLUSTER_NAME}.yaml"
 
 echo "Environment variables loaded."
-echo "  Cluster  : ${TP_CLUSTER_NAME} (${TP_CLUSTER_REGION})"
-echo "  CP Domain: ${TP_MY_DOMAIN:-<set CP_INSTANCE_ID and TP_HOSTED_ZONE_DOMAIN first>}"
-echo "  DP Domain: ${TP_DOMAIN}"
-echo "  Registry : ${TP_CONTAINER_REGISTRY_URL}"
+echo "  Cluster      : ${TP_CLUSTER_NAME} (${TP_CLUSTER_REGION})"
+echo "  DNS approach : ${TP_BASE_DNS_DOMAIN:+Simplified — base: ${TP_BASE_DNS_DOMAIN}}${TP_MY_DOMAIN:+Legacy — my: ${TP_MY_DOMAIN}}"
+echo "  DP Domain    : ${TP_DOMAIN}"
+echo "  Registry     : ${TP_CONTAINER_REGISTRY_URL}"
 echo ""
 echo "Review and update empty values before proceeding:"
 [ -z "$TP_CONTAINER_REGISTRY_USER" ]     && echo "  ⚠ TP_CONTAINER_REGISTRY_USER is not set"
 [ -z "$TP_CONTAINER_REGISTRY_PASSWORD" ] && echo "  ⚠ TP_CONTAINER_REGISTRY_PASSWORD is not set"
-[ -z "$TP_MY_DOMAIN_CERT_ARN" ]          && echo "  ⚠ TP_MY_DOMAIN_CERT_ARN is not set"
-[ -z "$TP_TUNNEL_DOMAIN_CERT_ARN" ]      && echo "  ⚠ TP_TUNNEL_DOMAIN_CERT_ARN is not set"
+# Simplified DNS cert check
+[ -n "$TP_BASE_DNS_DOMAIN" -a -z "$TP_BASE_DOMAIN_CERT_ARN" ] \
+                                           && echo "  ⚠ TP_BASE_DOMAIN_CERT_ARN is not set (required for simplified DNS)"
+# Legacy DNS cert checks (only warn when legacy vars are set)
+[ -n "$TP_MY_DOMAIN" -a -z "$TP_MY_DOMAIN_CERT_ARN" ] \
+                                           && echo "  ⚠ TP_MY_DOMAIN_CERT_ARN is not set (required for legacy DNS)"
+[ -n "$TP_TUNNEL_DOMAIN" -a -z "$TP_TUNNEL_DOMAIN_CERT_ARN" ] \
+                                           && echo "  ⚠ TP_TUNNEL_DOMAIN_CERT_ARN is not set (required for legacy DNS)"
 [ -z "$TP_RDS_MASTER_PASSWORD" -o "$TP_RDS_MASTER_PASSWORD" = "TP_DBAdminPassword" ] \
                                            && echo "  ⚠ TP_RDS_MASTER_PASSWORD is using the default placeholder"
