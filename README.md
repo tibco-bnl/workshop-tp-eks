@@ -11,13 +11,27 @@ This repository provides comprehensive guides and resources for deploying **TIBC
 **⚠️ Important:** Choose the appropriate documentation version for your deployment:
 
 ### 🌟 Version 1.17.0 (Current - Recommended for New Deployments)
+**EKS Deployment Improvements:**
 - ✅ **Simplified DNS**: Single base domain for admin, subscription, and tunnel — one ACM cert, simpler setup
 - ✅ **Optional Hybrid-Proxy**: Disable hybrid-proxy when not needed to save ~50% CPU/RAM
 - ✅ **Enhanced OTEL**: OpenTelemetry Collector 0.140.0 with centralized fluent-bit configuration
 - ✅ **BW5CE/BWCE V2 Jobs**: Parallel provisioner job templates for faster capability bootstrapping
 - ✅ **Updated Components**: Prometheus v3.5.2, Alertmanager v0.32.0, dp-config-aws 1.17.x
+
+**Control Plane Capability Features:**
+- ✅ **Webhook Receiver for Alerts**: Integrate alerts with external systems via JSON webhook (PagerDuty, Slack, Teams)
+- ✅ **OpenSearch Observability**: Use OpenSearch for Jaeger traces and service logs (alternative to Elasticsearch)
+- ✅ **BW6 Lifecycle Management**: Full Agent, Domain, AppSpace, AppNode, and Application management in UI
+- ✅ **Custom Fluentbit**: Configurable log forwarding for BW5/BW6 containers and Flogo via Helm values
+- ✅ **Flogo Recipe Customization**: YAML editor for capability recipes; 3 new connectors (GCS, ActiveSpaces, FTL)
+- ✅ **BW5 Hawk REST API**: 31 Hawk methods exposed on port 8090 in BW5CE
+- ✅ **Capability Management APIs**: Update and upgrade capability instances via REST (CI/CD automation)
+- ✅ **BW5 Application History**: Audit trail for deploy/undeploy operations in Application Configuration UI
+
 - 📘 [Setup Guide: CP + DP (v1.17)](./howto/how-to-cp-and-dp-eks-setup-guide)
+- 📘 [Quick Reference (v1.17)](./howto/v1.17/QUICK-REFERENCE)
 - 📋 [Release Notes (v1.17.0)](./releases/v1.17.0)
+- 📋 [Documentation Summary](./howto/v1.17/DOCUMENTATION-SUMMARY)
 
 ### Version 1.16.0 (Previous)
 - ✅ **License Management**: View details and receive expiration notifications (90/30/7 days)
@@ -49,6 +63,12 @@ Configure comprehensive monitoring and logging using Prometheus and Elastic Stac
 - 🎯 **Scope**: Complete TIBCO Platform 1.17.0 deployment on EKS including cluster creation
 - 🔧 **New Features**: Simplified DNS structure, optional hybrid-proxy, enhanced OTEL, BW5CE V2 job templates
 - ⏱️ **Duration**: 3-5 hours (including EKS cluster creation ~30 min)
+
+**[📖 Quick Reference Guide (v1.17)](./howto/v1.17/QUICK-REFERENCE)**
+- 🎯 **Scope**: Essential commands, new feature snippets, and configuration reference for v1.17.0
+
+**[📖 Documentation Summary (v1.17)](./howto/v1.17/DOCUMENTATION-SUMMARY)**
+- 🎯 **Scope**: Summary of all v1.17.0 documentation changes, EKS-specific considerations, and upgrade checklist
 
 **[📖 Release Notes (v1.17.0)](./releases/v1.17.0)**
 - 🎯 **Scope**: What's new, breaking changes, and upgrade path from 1.16.0
@@ -395,7 +415,10 @@ workshop-tp-eks/
 │   ├── how-to-dp-eks-setup-guide.md            # Data Plane only guide
 │   ├── how-to-dp-eks-observability.md          # Observability setup
 │   ├── how-to-add-dns-records-eks-aws.md       # Route 53 DNS configuration
-│   └── prerequisites-checklist-for-customer.md # Pre-installation checklist
+│   ├── prerequisites-checklist-for-customer.md # Pre-installation checklist
+│   └── v1.17/                                  # v1.17.0 version-specific guides
+│       ├── QUICK-REFERENCE.md                  # Quick commands and v1.17 snippets for EKS
+│       └── DOCUMENTATION-SUMMARY.md           # Summary of v1.17.0 documentation updates
 ├── scripts/                                     # Utility scripts
 │   ├── env.sh                                  # All environment variables (18 sections)
 │   └── connectivity-test-job.yaml              # Network connectivity test K8s Job
@@ -447,7 +470,7 @@ workshop-tp-eks/
 - **envsubst**: Part of homebrew gettext (0.24.1+)
 
 ### TIBCO Platform Components
-- **Control Plane**: v1.16.0
+- **Control Plane**: v1.17.0
 - **Data Plane**: Compatible with CP version
 - **PostgreSQL**: v16 (Amazon RDS Aurora PostgreSQL recommended)
 - **Capabilities**: BWCE, Flogo, EMS, Developer Hub
@@ -573,4 +596,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Maintained by**: TIBCO-BNL Team
 
-**Last Updated**: May 8, 2026
+**Last Updated**: May 19, 2026
