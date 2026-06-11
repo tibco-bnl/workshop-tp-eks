@@ -1,3 +1,8 @@
+---
+layout: default
+title: TIBCO Platform v1.18.0 Quick Reference Guide - EKS
+---
+
 # TIBCO Platform v1.18.0 Quick Reference Guide - EKS
 
 **TIBCO Platform Version**: 1.18.0 | **Platform**: Amazon EKS | **Status**: Current release
@@ -6,9 +11,9 @@
 
 | Service | URL Pattern | Notes |
 |---------|-------------|-------|
-| Admin Console | `https://admin.<TP_BASE_DNS_DOMAIN>` | Simplified DNS |
-| Subscription Portal | `https://<hostPrefix>.<TP_BASE_DNS_DOMAIN>` | Simplified DNS |
-| Hybrid Tunnel | `https://<hostPrefix>.<TP_BASE_DNS_DOMAIN>/infra/tunnel` | Same base domain |
+| Admin Console | `https://${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}` | Simplified DNS |
+| Subscription Portal | `https://${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}` | Simplified DNS |
+| Hybrid Tunnel | `https://${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}/infra/tunnel` | Same base domain |
 | Legacy Admin Console | `https://admin.${CP_INSTANCE_ID}-my.<domain>` | Split DNS only |
 
 ## Essential Commands
@@ -107,14 +112,14 @@ curl -o rds-ca-bundle.pem \
 ```bash
 # 1. Back up critical secrets
 kubectl get secret session-keys -n ${CP_INSTANCE_ID}-ns -o yaml > session-keys-backup.yaml
-kubectl get secret cporch-encryption-secret -n ${CP_INSTANCE_ID}-ns -o yaml > cporch-secret-backup.yaml
+kubectl get secret cporch-encryption-secret -n ${CP_INSTANCE_ID}-ns -o yaml > cporch-encryption-secret-backup.yaml
 
 # 2. Update Helm repository
 helm repo update
 
 # 3. Upgrade base chart with email values removed
 helm upgrade --install --wait --timeout 2h \
-  -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
+  -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco/tibco-cp-base \
   --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
   -f aws-tibco-cp-base-values.yaml
 ```

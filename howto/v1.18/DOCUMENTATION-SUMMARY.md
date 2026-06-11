@@ -1,3 +1,8 @@
+---
+layout: default
+title: TIBCO Platform v1.18.0 Documentation Summary - EKS
+---
+
 # TIBCO Platform v1.18.0 Documentation Summary - EKS
 
 **Date**: June 11, 2026
@@ -65,8 +70,20 @@ The docs keep the existing ALB plus Nginx or Traefik ingress as the baseline and
 - `howto/how-to-add-dns-records-eks-aws.md` - simplified DNS and Route 53 guidance
 - `docs/firewall-requirements-eks.md` - explicit 1.18 TIBCO documentation links
 - `howto/prerequisites-checklist-for-customer.md` - chart version references
-- `scripts/env.sh` - comments for 1.18 email and RDS SSL behavior
+- `scripts/env.sh` - comments for 1.18 email, RDS SSL behavior, and upstream AWS helper script location
 - `pipelines/azure-devops/deploy-tibco-control-plane.yml` - avoids deprecated 1.18 email Helm values
+
+## Upstream Helper Scripts
+
+The AWS provisioning helper scripts used by the shared guide remain maintained in the upstream [tp-helm-charts EKS scripts directory](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/scripts). This workshop references them with direct download commands instead of copying them locally.
+
+Relevant upstream helpers:
+
+- `get-cluster-details.sh`
+- `create-crossplane-role.sh`
+- `create-efs-control-plane.sh`
+- `create-rds.sh`
+- `create-efs-data-plane.sh`
 
 ## Validation Checklist
 

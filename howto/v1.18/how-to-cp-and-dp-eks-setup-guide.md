@@ -21,7 +21,7 @@ Use the 1.18.0 base chart:
 
 ```bash
 helm upgrade --install --wait --timeout 2h --create-namespace \
-  -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
+  -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco/tibco-cp-base \
   --labels layer=1 \
   --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
   -f aws-tibco-cp-base-values.yaml
