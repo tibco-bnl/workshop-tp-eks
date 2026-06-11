@@ -57,7 +57,7 @@ The shared guide now calls out that Crossplane-created Aurora clusters may enfor
 
 ### Email
 
-The 1.18 examples no longer emit `global.external.emailServerType` or `global.external.emailServer` values. Configure SES, SMTP, or SendGrid from the Platform Console after deployment.
+The 1.18 examples no longer emit `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` values. Configure SES, SMTP, or SendGrid from the Platform Console after deployment. The remaining `global.tibco.networkPolicy.emailServer` block in `tibco-cp-base` is only for optional egress NetworkPolicy creation.
 
 ### Gateway API
 

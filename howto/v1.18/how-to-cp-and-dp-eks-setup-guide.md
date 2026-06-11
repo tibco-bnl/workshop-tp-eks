@@ -31,6 +31,8 @@ helm upgrade --install --wait --timeout 2h --create-namespace \
 
 Do not include deprecated email server values in `aws-tibco-cp-base-values.yaml`. In 1.18.0, configure SES, SMTP, or SendGrid from the TIBCO Platform Console after installation or upgrade.
 
+The `tibco-cp-base` chart still includes `global.tibco.networkPolicy.emailServer`, but that block is only for optional egress NetworkPolicy creation. Leave its `CIDR` empty unless you need an explicit allow rule to an email provider; it does not configure the provider itself.
+
 Remove these values if they exist in older files:
 
 ```yaml

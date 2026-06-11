@@ -249,8 +249,8 @@ All three pipelines require a Variable Group named **`tibco-platform-eks-secrets
 | `TP_CONTAINER_REGISTRY_PASSWORD` | Secret | JFrog Artifactory API key / password |
 | `TP_DB_PASSWORD` | Secret | Aurora PostgreSQL master password |
 | `TP_ADMIN_INITIAL_PASSWORD` | Secret | Initial CP admin password (min 8 chars) |
-| `TP_SMTP_PASSWORD` | Secret | Optional — SMTP relay password |
-| `TP_SENDGRID_API_KEY` | Secret | Optional — SendGrid API key |
+| `TP_SMTP_PASSWORD` | Secret | Optional — SMTP relay password for post-install Console email setup |
+| `TP_SENDGRID_API_KEY` | Secret | Optional — SendGrid API key for post-install Console email setup |
 | `TP_LOGSERVER_PASSWORD` | Secret | Optional — Elasticsearch password |
 
 **Azure Key Vault integration (recommended for production):**
@@ -331,7 +331,7 @@ graph TD
     A[EKS Cluster] --> B[Control Plane]
     A --> C[Data Plane]
     B --> D[Amazon RDS Aurora PostgreSQL]
-    B --> E[MailDev / Amazon SES]
+    B --> E[Platform Console email provider]
     C --> F[BWCE Apps]
     C --> G[Flogo Apps]
     A --> H[Observability Stack]

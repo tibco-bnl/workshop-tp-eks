@@ -142,7 +142,7 @@ The complete list of variables used in this guide, organized by purpose. All are
 
 **Email (configure after deploying tibco-cp-base in 1.18.0)**
 
-In TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 Helm values file.
+In TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 Helm values file. The only remaining email-related value in `tibco-cp-base` is `global.tibco.networkPolicy.emailServer`, which is optional egress NetworkPolicy configuration and is not an email provider configuration.
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
@@ -153,6 +153,7 @@ In TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Pl
 | `TP_SES_ARN` | _(empty)_ | AWS SES identity ARN (when `TP_EMAIL_SERVER_TYPE=ses`) |
 | `TP_SMTP_SERVER` | _(empty)_ | SMTP relay hostname (when `TP_EMAIL_SERVER_TYPE=smtp`) |
 | `TP_SMTP_PORT` | `587` | SMTP port |
+| `TP_EMAIL_SERVER_CIDR` | _(empty)_ | Optional CIDR for email-provider egress NetworkPolicy; leave empty to skip creating this policy |
 | `TP_SMTP_USERNAME` | _(empty)_ | SMTP username |
 | `TP_SMTP_PASSWORD` | _(empty)_ | SMTP password |
 | `TP_SENDGRID_API_KEY` | _(empty)_ | SendGrid API key (when `TP_EMAIL_SERVER_TYPE=sendgrid`) |
@@ -1089,9 +1090,10 @@ Set admin variables and record email settings for the Console (all defined in `s
 ```bash
 # Email configuration moved to Platform Console in TIBCO Platform 1.18.0.
 # Keep these values available for the post-install Console configuration, but do not
-# include the deprecated emailServerType/emailServer Helm values in 1.18.0 values.
+# include the deprecated global.external email Helm values in 1.18.0 values.
 export TP_EMAIL_SERVER_TYPE="ses"                       # "ses", "smtp", or "sendgrid"
 export TP_FROM_EMAIL="noreply@${TP_HOSTED_ZONE_DOMAIN}" # From address for CP notifications
+export TP_EMAIL_SERVER_CIDR=""                          # Optional egress NetworkPolicy CIDR only
 
 # SES — set the SES identity ARN (must be in the same or allowed region)
 export TP_SES_ARN="arn:aws:ses:us-east-1:$(aws sts get-caller-identity --query Account --output text):identity/${TP_FROM_EMAIL}"
@@ -1122,14 +1124,16 @@ The key differences from legacy DNS:
 - Router ingress lists specific hosts (`admin.xxx`, `dev.xxx`) instead of a wildcard
 - Hybrid proxy traffic is routed on the subscription host under `/infra/tunnel`
 - Email server settings are intentionally omitted from 1.18.0 Helm values and configured in the Platform Console
+- `global.tibco.networkPolicy.emailServer` is optional egress NetworkPolicy only; it does not configure SES, SMTP, or SendGrid
 
 ```bash
 cat > aws-tibco-cp-base-values.yaml <(envsubst \
   '${TP_ENABLE_NETWORK_POLICY}, ${TP_CONTAINER_REGISTRY_URL}, ${TP_CONTAINER_REGISTRY_USER},
    ${TP_CONTAINER_REGISTRY_PASSWORD}, ${CP_INSTANCE_ID}, ${CP_ADMIN_HOST_PREFIX}, ${CP_SUBSCRIPTION},
    ${CP_HYBRID_CONNECTIVITY}, ${TP_BASE_DNS_DOMAIN},
-   ${TP_VPC_CIDR}, ${TP_SERVICE_CIDR}, ${TP_STORAGE_CLASS_EFS}, ${TP_INGRESS_CONTROLLER},
+  ${TP_VPC_CIDR}, ${TP_SERVICE_CIDR}, ${TP_STORAGE_CLASS_EFS}, ${TP_INGRESS_CONTROLLER},
   ${TP_DB_HOST}, ${TP_DB_NAME}, ${TP_DB_PORT}, ${TP_DB_USERNAME}, ${TP_DB_PASSWORD}, ${TP_DB_SSL_MODE},
+  ${TP_EMAIL_SERVER_CIDR}, ${TP_SMTP_PORT},
   ${TP_ADMIN_EMAIL}, ${TP_ADMIN_FIRSTNAME}, ${TP_ADMIN_LASTNAME},
    ${TP_ADMIN_INITIAL_PASSWORD}, ${TP_ADMIN_CUSTOMER_ID},
    ${TP_HTTP_PROXY}, ${TP_HTTPS_PROXY}, ${TP_NO_PROXY},
@@ -1200,8 +1204,10 @@ global:
       logServer:
         CIDR: ""
         port: "9200"
+      # Optional email-provider egress policy only. Leave CIDR empty to skip
+      # creating this policy. Configure SES, SMTP, or SendGrid in Platform Console.
       emailServer:
-        CIDR: ""
+        CIDR: "${TP_EMAIL_SERVER_CIDR}"
         port: "${TP_SMTP_PORT}"
       containerRegistry:
         CIDR: ""
@@ -1266,8 +1272,9 @@ Use this when you chose Option 2 (legacy multi-level DNS) in Part 7. The key dif
 cat > aws-tibco-cp-base-values.yaml <(envsubst \
   '${TP_ENABLE_NETWORK_POLICY}, ${TP_CONTAINER_REGISTRY_URL}, ${TP_CONTAINER_REGISTRY_USER},
    ${TP_CONTAINER_REGISTRY_PASSWORD}, ${CP_INSTANCE_ID}, ${TP_TUNNEL_DOMAIN}, ${TP_MY_DOMAIN},
-   ${TP_VPC_CIDR}, ${TP_SERVICE_CIDR}, ${TP_STORAGE_CLASS_EFS}, ${TP_INGRESS_CONTROLLER},
+  ${TP_VPC_CIDR}, ${TP_SERVICE_CIDR}, ${TP_STORAGE_CLASS_EFS}, ${TP_INGRESS_CONTROLLER},
   ${TP_DB_HOST}, ${TP_DB_NAME}, ${TP_DB_PORT}, ${TP_DB_USERNAME}, ${TP_DB_PASSWORD}, ${TP_DB_SSL_MODE},
+  ${TP_EMAIL_SERVER_CIDR}, ${TP_SMTP_PORT},
   ${TP_ADMIN_EMAIL}, ${TP_ADMIN_FIRSTNAME}, ${TP_ADMIN_LASTNAME},
    ${TP_ADMIN_INITIAL_PASSWORD}, ${TP_ADMIN_CUSTOMER_ID},
    ${TP_HTTP_PROXY}, ${TP_HTTPS_PROXY}, ${TP_NO_PROXY},
@@ -1334,8 +1341,10 @@ global:
       logServer:
         CIDR: ""
         port: "9200"
+      # Optional email-provider egress policy only. Leave CIDR empty to skip
+      # creating this policy. Configure SES, SMTP, or SendGrid in Platform Console.
       emailServer:
-        CIDR: ""
+        CIDR: "${TP_EMAIL_SERVER_CIDR}"
         port: "${TP_SMTP_PORT}"
       containerRegistry:
         CIDR: ""
@@ -1398,6 +1407,8 @@ cat aws-tibco-cp-base-values.yaml
 ```
 
 > **Important:** Review the file for any `${}` placeholders that were not substituted — this indicates an env var that was not set before generating the file.
+
+> **Email note for 1.18.0:** Do not add `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` to `aws-tibco-cp-base-values.yaml`. Use Platform Console for SES, SMTP, or SendGrid configuration. The `global.tibco.networkPolicy.emailServer` block shown above only controls optional egress NetworkPolicy creation; if `CIDR` is empty, the chart does not create the email-server egress policy.
 
 ---
 

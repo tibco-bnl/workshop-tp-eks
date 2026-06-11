@@ -344,6 +344,9 @@ export TP_DB_SSL_ROOT_CERT_PATH="/etc/ssl/certs/rds-ca-bundle.pem"
 # Platform Console after installation or upgrade. Keep these variables as a
 # place to record SES/SMTP/SendGrid settings, but do not pass the deprecated
 # global.external.emailServer* values to tibco-cp-base 1.18.0 Helm installs.
+# The only email-related tibco-cp-base value that remains is the optional
+# global.tibco.networkPolicy.emailServer egress policy. Leave its CIDR empty
+# unless your network-policy model needs a specific email-provider allow rule.
 #
 # Supported email server types:
 #   "ses"      — AWS Simple Email Service (recommended for AWS deployments)
@@ -368,6 +371,7 @@ export TP_SES_ARN=""                          # SES identity ARN (e.g., arn:aws:
 # SMTP configuration (used when TP_EMAIL_SERVER_TYPE="smtp")
 export TP_SMTP_SERVER=""                      # SMTP relay hostname
 export TP_SMTP_PORT="587"                     # SMTP port (587 for TLS, 465 for SSL, 25 for plain)
+export TP_EMAIL_SERVER_CIDR=""                # Optional egress NetworkPolicy CIDR only; empty means no email-server policy
 export TP_SMTP_USERNAME=""                    # SMTP authentication username
 export TP_SMTP_PASSWORD=""                    # SMTP authentication password
 

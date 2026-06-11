@@ -34,8 +34,8 @@
 #     TP_CONTAINER_REGISTRY_PASSWORD   JFrog Artifactory API key / password
 #     TP_DB_PASSWORD                   Aurora PostgreSQL master password
 #     TP_ADMIN_INITIAL_PASSWORD        Initial CP admin password (min 8 chars)
-#     TP_SMTP_PASSWORD                 (optional) SMTP relay password
-#     TP_SENDGRID_API_KEY              (optional) SendGrid API key
+#     TP_SMTP_PASSWORD                 (optional) SMTP relay password for Console email setup
+#     TP_SENDGRID_API_KEY              (optional) SendGrid API key for Console email setup
 #
 #   tibco-platform-eks-config — non-secret configuration (plain variable group)
 #     See the variables section below for a complete list.
@@ -189,7 +189,7 @@ parameters:
   # --- Email reference values ---
   # TIBCO Platform 1.18.0 configures SES/SMTP/SendGrid in Platform Console
   # after installation. These parameters are retained for operator reference
-  # and optional network-policy port planning; they are not emitted as Helm
+  # and optional network-policy egress planning; they are not emitted as Helm
   # global.external.emailServer* values.
   - name: emailServerType
     displayName: 'Email Server Type for post-install Console configuration'
@@ -217,7 +217,7 @@ parameters:
     default: ''
 
   - name: smtpPort
-    displayName: 'SMTP Port'
+    displayName: 'SMTP Port for post-install Console configuration / optional egress policy'
     type: string
     default: '587'
 
@@ -723,6 +723,10 @@ stages:
                     logServer:
                       CIDR: ""
                       port: "9200"
+                    # Optional email-provider egress NetworkPolicy only.
+                    # CIDR is intentionally empty, so tibco-cp-base does not
+                    # create this policy by default. SES/SMTP/SendGrid provider
+                    # settings are configured in Platform Console for 1.18.0.
                     emailServer:
                       CIDR: ""
                       port: "${{ parameters.smtpPort }}"
