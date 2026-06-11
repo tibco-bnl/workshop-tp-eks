@@ -69,7 +69,7 @@ dig +short ${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}
 
 ### Email Configuration
 
-Email server settings moved to the Platform Console. Remove deprecated Helm values before upgrade, then configure SES, SMTP, or SendGrid in the UI.
+Email server settings moved to the Platform Console. Remove deprecated Helm values before upgrade, then configure SES, SMTP, SendGrid, or Microsoft Graph in the UI.
 
 ### Gateway API
 

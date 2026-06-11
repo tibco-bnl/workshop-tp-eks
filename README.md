@@ -15,7 +15,7 @@ This repository provides comprehensive guides and resources for deploying **TIBC
 - ✅ **Simplified DNS Continues**: Single Route 53 base domain for admin, subscription, and tunnel path — one ACM wildcard certificate
 - ✅ **Gateway API Evaluation Path**: Traefik Gateway API support can be evaluated for supported BW5, BW6, and Flogo endpoint exposure
 - ✅ **Namespace-Level RBAC**: Application Manager and Application Viewer role assignments can be scoped by Data Plane namespace
-- ✅ **Console-Managed Email**: Configure SES, SMTP, or SendGrid from Platform Console after install or upgrade
+- ✅ **Console-Managed Email**: Configure SES, SMTP, SendGrid, or Microsoft Graph from Platform Console after install or upgrade
 - ✅ **Aurora PostgreSQL SSL Guidance**: Use `require` or `verify-full` when `rds.force_ssl=1` is enforced
 
 **Control Plane Capability Features:**

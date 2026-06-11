@@ -29,7 +29,7 @@ helm upgrade --install --wait --timeout 2h --create-namespace \
 
 ### Email Server Configuration
 
-Do not include deprecated email server values in `aws-tibco-cp-base-values.yaml`. In 1.18.0, configure SES, SMTP, or SendGrid from the TIBCO Platform Console after installation or upgrade.
+Do not include deprecated email server values in `aws-tibco-cp-base-values.yaml`. In 1.18.0, configure SES, SMTP, SendGrid, or Microsoft Graph from the TIBCO Platform Console after installation or upgrade.
 
 The `tibco-cp-base` chart still includes `global.tibco.networkPolicy.emailServer`, but that block is only for optional egress NetworkPolicy creation. Leave its `CIDR` empty unless you need an explicit allow rule to an email provider; it does not configure the provider itself.
 
@@ -128,7 +128,7 @@ After upgrade, validate the Alerts Audit Trail page in the TIBCO Platform Consol
 
 - [ ] `tibco-cp-base` is upgraded to 1.18.0.
 - [ ] Deprecated email Helm values are removed.
-- [ ] SES, SMTP, or SendGrid is configured from the Platform Console if notifications are needed.
+- [ ] SES, SMTP, SendGrid, or Microsoft Graph is configured from the Platform Console if notifications are needed.
 - [ ] Route 53 simplified DNS resolves for admin and subscription hosts.
 - [ ] Aurora PostgreSQL SSL mode matches your RDS parameter group.
 - [ ] Data Plane namespaces and RBAC assignments are reviewed.

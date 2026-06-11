@@ -187,7 +187,7 @@ parameters:
       - verify-full
 
   # --- Email reference values ---
-  # TIBCO Platform 1.18.0 configures SES/SMTP/SendGrid in Platform Console
+  # TIBCO Platform 1.18.0 configures SES/SMTP/SendGrid/Microsoft Graph in Platform Console
   # after installation. These parameters are retained for operator reference
   # and optional network-policy egress planning; they are not emitted as Helm
   # global.external.emailServer* values.
@@ -199,6 +199,7 @@ parameters:
       - ses
       - smtp
       - sendgrid
+      - graph
       - ''
 
   - name: fromEmail
@@ -725,7 +726,7 @@ stages:
                       port: "9200"
                     # Optional email-provider egress NetworkPolicy only.
                     # CIDR is intentionally empty, so tibco-cp-base does not
-                    # create this policy by default. SES/SMTP/SendGrid provider
+                    # create this policy by default. SES/SMTP/SendGrid/Microsoft Graph provider
                     # settings are configured in Platform Console for 1.18.0.
                     emailServer:
                       CIDR: ""

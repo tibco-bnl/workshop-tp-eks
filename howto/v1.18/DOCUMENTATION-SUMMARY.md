@@ -26,7 +26,7 @@ releases/
 |------|---------------|------------|
 | Gateway API | Gateway API Controller support for Control Tower data planes | EKS Traefik users can evaluate Gateway API endpoint exposure |
 | RBAC | Namespace-level RBAC for Application Manager and Application Viewer | Review Data Plane namespaces and role assignments after upgrade |
-| Email | Email server configuration moved to Platform Console | Remove deprecated Helm values; configure SES, SMTP, or SendGrid in UI |
+| Email | Email server configuration moved to Platform Console | Remove deprecated Helm values; configure SES, SMTP, SendGrid, or Microsoft Graph in UI |
 | Alerts | Alerts Audit Trail page | Add alert audit validation to post-upgrade checks |
 | Developer Hub | Self-service flows | Upgrade Developer Hub charts with the release |
 | DNS | Simplified DNS continues | Keep one Route 53 base domain and one ACM wildcard certificate |
@@ -57,7 +57,7 @@ The shared guide now calls out that Crossplane-created Aurora clusters may enfor
 
 ### Email
 
-The 1.18 examples no longer emit `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` values. Configure SES, SMTP, or SendGrid from the Platform Console after deployment. The remaining `global.tibco.networkPolicy.emailServer` block in `tibco-cp-base` is only for optional egress NetworkPolicy creation.
+The 1.18 examples no longer emit `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` values. Configure SES, SMTP, SendGrid, or Microsoft Graph from the Platform Console after deployment. The remaining `global.tibco.networkPolicy.emailServer` block in `tibco-cp-base` is only for optional egress NetworkPolicy creation.
 
 ### Gateway API
 

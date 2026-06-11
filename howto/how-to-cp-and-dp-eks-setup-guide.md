@@ -146,7 +146,7 @@ In TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Pl
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
-| `TP_EMAIL_SERVER_TYPE` | _(empty)_ | Email backend: `ses`, `smtp`, or `sendgrid` |
+| `TP_EMAIL_SERVER_TYPE` | _(empty)_ | Email backend for Console setup: `ses`, `smtp`, `sendgrid`, or `graph` |
 | `TP_FROM_EMAIL` | _(empty)_ | From address for CP notifications |
 | `TP_EMAIL_CC_ADDRESSES` | _(empty)_ | Optional CC addresses for platform notifications |
 | `TP_REPORTS_EMAIL_ALIAS` | _(empty)_ | Optional email alias for scheduled reports |
@@ -1091,7 +1091,7 @@ Set admin variables and record email settings for the Console (all defined in `s
 # Email configuration moved to Platform Console in TIBCO Platform 1.18.0.
 # Keep these values available for the post-install Console configuration, but do not
 # include the deprecated global.external email Helm values in 1.18.0 values.
-export TP_EMAIL_SERVER_TYPE="ses"                       # "ses", "smtp", or "sendgrid"
+export TP_EMAIL_SERVER_TYPE="ses"                       # "ses", "smtp", "sendgrid", or "graph"
 export TP_FROM_EMAIL="noreply@${TP_HOSTED_ZONE_DOMAIN}" # From address for CP notifications
 export TP_EMAIL_SERVER_CIDR=""                          # Optional egress NetworkPolicy CIDR only
 
@@ -1124,7 +1124,7 @@ The key differences from legacy DNS:
 - Router ingress lists specific hosts (`admin.xxx`, `dev.xxx`) instead of a wildcard
 - Hybrid proxy traffic is routed on the subscription host under `/infra/tunnel`
 - Email server settings are intentionally omitted from 1.18.0 Helm values and configured in the Platform Console
-- `global.tibco.networkPolicy.emailServer` is optional egress NetworkPolicy only; it does not configure SES, SMTP, or SendGrid
+- `global.tibco.networkPolicy.emailServer` is optional egress NetworkPolicy only; it does not configure SES, SMTP, SendGrid, or Microsoft Graph
 
 ```bash
 cat > aws-tibco-cp-base-values.yaml <(envsubst \
@@ -1205,7 +1205,7 @@ global:
         CIDR: ""
         port: "9200"
       # Optional email-provider egress policy only. Leave CIDR empty to skip
-      # creating this policy. Configure SES, SMTP, or SendGrid in Platform Console.
+      # creating this policy. Configure SES, SMTP, SendGrid, or Microsoft Graph in Platform Console.
       emailServer:
         CIDR: "${TP_EMAIL_SERVER_CIDR}"
         port: "${TP_SMTP_PORT}"
@@ -1342,7 +1342,7 @@ global:
         CIDR: ""
         port: "9200"
       # Optional email-provider egress policy only. Leave CIDR empty to skip
-      # creating this policy. Configure SES, SMTP, or SendGrid in Platform Console.
+      # creating this policy. Configure SES, SMTP, SendGrid, or Microsoft Graph in Platform Console.
       emailServer:
         CIDR: "${TP_EMAIL_SERVER_CIDR}"
         port: "${TP_SMTP_PORT}"
@@ -1408,7 +1408,7 @@ cat aws-tibco-cp-base-values.yaml
 
 > **Important:** Review the file for any `${}` placeholders that were not substituted — this indicates an env var that was not set before generating the file.
 
-> **Email note for 1.18.0:** Do not add `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` to `aws-tibco-cp-base-values.yaml`. Use Platform Console for SES, SMTP, or SendGrid configuration. The `global.tibco.networkPolicy.emailServer` block shown above only controls optional egress NetworkPolicy creation; if `CIDR` is empty, the chart does not create the email-server egress policy.
+> **Email note for 1.18.0:** Do not add `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` to `aws-tibco-cp-base-values.yaml`. Use Platform Console for SES, SMTP, SendGrid, or Microsoft Graph configuration. The `global.tibco.networkPolicy.emailServer` block shown above only controls optional egress NetworkPolicy creation; if `CIDR` is empty, the chart does not create the email-server egress policy.
 
 ---
 
@@ -1569,7 +1569,7 @@ kubectl get pods -n ${CP_INSTANCE_ID}-ns
 1. Navigate to `https://${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}` (simplified DNS) or `https://admin.${TP_MY_DOMAIN}` (legacy DNS)
 2. Log in with `${TP_ADMIN_EMAIL}` and `${TP_ADMIN_INITIAL_PASSWORD}`
 3. Change the password on first login
-4. Configure the email server from the Platform Console if you need SES, SMTP, or SendGrid notifications
+4. Configure the email server from the Platform Console if you need SES, SMTP, SendGrid, or Microsoft Graph notifications
 5. Create a subscription with your chosen `hostPrefix` (e.g., `dev`) to access the subscription portal
 
 Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)

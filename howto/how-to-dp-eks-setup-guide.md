@@ -51,7 +51,7 @@ Key AWS components:
 - **Kong** (optional): Separate ingress for user app endpoints
 - **Amazon Route 53**: DNS automation via External DNS
 
-> **Control Plane email note:** This DP-only guide does not install `tibco-cp-base`. For a connected TIBCO Platform Control Plane 1.18.0 or later, configure SES, SMTP, or SendGrid from Platform Console. Do not add the deprecated `global.external.emailServer*` values to the Control Plane Helm values file; `global.tibco.networkPolicy.emailServer` is only optional egress NetworkPolicy configuration.
+> **Control Plane email note:** This DP-only guide does not install `tibco-cp-base`. For a connected TIBCO Platform Control Plane 1.18.0 or later, configure SES, SMTP, SendGrid, or Microsoft Graph from Platform Console. Do not add the deprecated `global.external.emailServer*` values to the Control Plane Helm values file; `global.tibco.networkPolicy.emailServer` is only optional egress NetworkPolicy configuration.
 
 ---
 

@@ -342,7 +342,7 @@ export TP_DB_SSL_ROOT_CERT_PATH="/etc/ssl/certs/rds-ca-bundle.pem"
 #
 # In TIBCO Platform 1.18.0, email server settings are configured in the
 # Platform Console after installation or upgrade. Keep these variables as a
-# place to record SES/SMTP/SendGrid settings, but do not pass the deprecated
+# place to record SES/SMTP/SendGrid/Microsoft Graph planning details, but do not pass the deprecated
 # global.external.emailServer* values to tibco-cp-base 1.18.0 Helm installs.
 # The only email-related tibco-cp-base value that remains is the optional
 # global.tibco.networkPolicy.emailServer egress policy. Leave its CIDR empty
@@ -352,6 +352,7 @@ export TP_DB_SSL_ROOT_CERT_PATH="/etc/ssl/certs/rds-ca-bundle.pem"
 #   "ses"      — AWS Simple Email Service (recommended for AWS deployments)
 #   "smtp"     — Standard SMTP relay (e.g., Office 365, Gmail, corporate mail)
 #   "sendgrid" — SendGrid API (third-party email delivery)
+#   "graph"    — Microsoft Graph API (requires Microsoft Entra app registration)
 #
 # For SES: The CP service account must have AmazonSESFullAccess policy via IRSA.
 #           The SES identity ARN must be in the same region as the cluster.
@@ -359,8 +360,9 @@ export TP_DB_SSL_ROOT_CERT_PATH="/etc/ssl/certs/rds-ca-bundle.pem"
 #
 # For SMTP: Ensure your corporate SMTP relay allows connections from the EKS VPC.
 # For SendGrid: Create an API key at https://app.sendgrid.com/settings/api_keys
+# For Microsoft Graph: Register a single-tenant Microsoft Entra app with Mail.Send application permission.
 
-export TP_EMAIL_SERVER_TYPE=""                # "ses", "smtp", or "sendgrid" (leave empty to disable email)
+export TP_EMAIL_SERVER_TYPE=""                # "ses", "smtp", "sendgrid", or "graph" (leave empty to disable email)
 export TP_FROM_EMAIL=""                       # From address for all CP notifications (e.g., noreply@aws.example.com)
 export TP_EMAIL_CC_ADDRESSES=""               # Optional: CC addresses for platform notifications (comma-separated)
 export TP_REPORTS_EMAIL_ALIAS=""              # Optional: Email alias for scheduled report delivery
