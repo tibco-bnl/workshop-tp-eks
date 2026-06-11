@@ -112,7 +112,7 @@ workshop-tp-eks/
 
 ## Automation
 
-The [Azure DevOps pipeline folder](./pipelines/azure-devops) includes three ready-to-import pipelines:
+The [Azure DevOps pipeline folder](https://github.com/tibco-bnl/workshop-tp-eks/tree/main/pipelines/azure-devops) includes three ready-to-import pipelines:
 
 | Pipeline | Purpose |
 |----------|---------|
@@ -160,7 +160,7 @@ Start with these checks before raising a support ticket:
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the Apache License 2.0. See [LICENSE](https://github.com/tibco-bnl/workshop-tp-eks/blob/main/LICENSE) for details.
 
 **Maintained by:** TIBCO-BNL Team
 **Last updated:** June 11, 2026

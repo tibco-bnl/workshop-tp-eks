@@ -320,7 +320,7 @@ kubectl run test-ecr --image=curlimages/curl --rm -it --restart=Never -- \
   curl -I https://public.ecr.aws
 ```
 
-Alternatively, use the [connectivity test job](../scripts/connectivity-test-job.yaml) in the `scripts/` directory:
+Alternatively, use the [connectivity test job](https://github.com/tibco-bnl/workshop-tp-eks/blob/main/scripts/connectivity-test-job.yaml) in the `scripts/` directory:
 
 ```bash
 kubectl apply -f scripts/connectivity-test-job.yaml
