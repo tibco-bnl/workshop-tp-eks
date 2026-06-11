@@ -75,7 +75,7 @@ graph TB
 
 ## Prerequisites
 
-- EKS cluster with Data Plane tools installed (see [Data Plane Setup Guide](how-to-dp-eks-setup-guide.md))
+- EKS cluster with Data Plane tools installed (see [Data Plane Setup Guide](how-to-dp-eks-setup-guide))
 - Ingress controller installed (Nginx, Traefik, or Kong)
 - Storage classes `ebs-gp3` and `efs-sc` available (from `dp-config-aws` chart)
 
@@ -657,8 +657,8 @@ kubectl get ingress -n prometheus-system kube-prometheus-stack-grafana \
 - [Elastic Cloud on Kubernetes (ECK)](https://www.elastic.co/guide/en/cloud-on-k8s/current/index.html)
 - [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
 - [dp-config-es chart](https://github.com/TIBCOSoftware/tp-helm-charts)
-- [TIBCO Platform Observability Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#UserGuide/observability.htm)
+- [TIBCO Platform Observability Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/observability.htm)
 - [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otel/protocol/)
 - [Kong OpenTelemetry Plugin](https://docs.konghq.com/hub/kong-inc/opentelemetry/)
-- [Data Plane Setup Guide](how-to-dp-eks-setup-guide.md)
-- [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide.md)
+- [Data Plane Setup Guide](how-to-dp-eks-setup-guide)
+- [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide)

@@ -1,8 +1,8 @@
 # TIBCO Platform on Amazon Elastic Kubernetes Service (EKS) Workshop
 
-> **Current Release:** [v1.17.0](./releases/v1.17.0) | **TIBCO Platform CP Version:** 1.17.0  
+> **Current Release:** [v1.18.0](./releases/v1.18.0) | **TIBCO Platform CP Version:** 1.18.0
 > 📋 **Release History:** See `releases` folder for all versions  
-> 🔄 **Upgrading from 1.16.0?** See the [1.17.0 Release Notes](./releases/v1.17.0#upgrade-path)
+> 🔄 **Upgrading from 1.17.0?** See the [1.18.0 Release Notes](./releases/v1.18.0#upgrade-path-from-v1170)
 
 This repository provides comprehensive guides and resources for deploying **TIBCO Platform** on **Amazon Elastic Kubernetes Service (EKS)** clusters. It covers multiple deployment scenarios from basic EKS cluster setup to full Control Plane and Data Plane deployments with observability.
 
@@ -10,7 +10,25 @@ This repository provides comprehensive guides and resources for deploying **TIBC
 
 **⚠️ Important:** Choose the appropriate documentation version for your deployment:
 
-### 🌟 Version 1.17.0 (Current - Recommended for New Deployments)
+### 🌟 Version 1.18.0 (Current - Recommended for New Deployments)
+**EKS Deployment Notes:**
+- ✅ **Simplified DNS Continues**: Single Route 53 base domain for admin, subscription, and tunnel path — one ACM wildcard certificate
+- ✅ **Gateway API Evaluation Path**: Traefik Gateway API support can be evaluated for supported BW5, BW6, and Flogo endpoint exposure
+- ✅ **Namespace-Level RBAC**: Application Manager and Application Viewer role assignments can be scoped by Data Plane namespace
+- ✅ **Console-Managed Email**: Configure SES, SMTP, or SendGrid from Platform Console after install or upgrade
+- ✅ **Aurora PostgreSQL SSL Guidance**: Use `require` or `verify-full` when `rds.force_ssl=1` is enforced
+
+**Control Plane Capability Features:**
+- ✅ **Alert Audit Trail**: Review alert health and rule-performance events from the UI
+- ✅ **Developer Hub Self-Service Flows**: Build reusable automation flows through templates and platform APIs
+- ✅ **Gateway API Controller Support**: Use Gateway API with supported Control Tower data planes
+
+- 📘 [Setup Guide: CP + DP (v1.18)](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide)
+- 📘 [Quick Reference (v1.18)](./howto/v1.18/QUICK-REFERENCE)
+- 📋 [Release Notes (v1.18.0)](./releases/v1.18.0)
+- 📋 [Documentation Summary (v1.18)](./howto/v1.18/DOCUMENTATION-SUMMARY)
+
+### Version 1.17.0 (Previous)
 **EKS Deployment Improvements:**
 - ✅ **Simplified DNS**: Single base domain for admin, subscription, and tunnel — one ACM cert, simpler setup
 - ✅ **Optional Hybrid-Proxy**: Disable hybrid-proxy when not needed to save ~50% CPU/RAM
@@ -57,7 +75,22 @@ Configure comprehensive monitoring and logging using Prometheus and Elastic Stac
 
 ### 🏗️ Version-Specific Setup Guides
 
-#### Version 1.17.0 (Current Release)
+#### Version 1.18.0 (Current Release)
+
+**[📖 How to Set Up EKS Cluster with Control Plane and Data Plane (v1.18)](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide)**
+- 🎯 **Scope**: 1.18.0 overlay for the shared EKS CP+DP setup guide
+- 🔧 **New Features**: Gateway API notes, namespace-level RBAC, Console-managed email, simplified DNS continuity
+
+**[📖 Quick Reference Guide (v1.18)](./howto/v1.18/QUICK-REFERENCE)**
+- 🎯 **Scope**: Essential commands, new feature snippets, and configuration reference for v1.18.0
+
+**[📖 Documentation Summary (v1.18)](./howto/v1.18/DOCUMENTATION-SUMMARY)**
+- 🎯 **Scope**: Summary of all v1.18.0 documentation changes and EKS-specific considerations
+
+**[📖 Release Notes (v1.18.0)](./releases/v1.18.0)**
+- 🎯 **Scope**: What's new, upgrade path from 1.17.0, and EKS-specific considerations
+
+#### Version 1.17.0 (Previous Release)
 
 **[📖 How to Set Up EKS Cluster with Control Plane and Data Plane (v1.17)](./howto/how-to-cp-and-dp-eks-setup-guide)**
 - 🎯 **Scope**: Complete TIBCO Platform 1.17.0 deployment on EKS including cluster creation
@@ -416,9 +449,13 @@ workshop-tp-eks/
 │   ├── how-to-dp-eks-observability.md          # Observability setup
 │   ├── how-to-add-dns-records-eks-aws.md       # Route 53 DNS configuration
 │   ├── prerequisites-checklist-for-customer.md # Pre-installation checklist
-│   └── v1.17/                                  # v1.17.0 version-specific guides
-│       ├── QUICK-REFERENCE.md                  # Quick commands and v1.17 snippets for EKS
-│       └── DOCUMENTATION-SUMMARY.md           # Summary of v1.17.0 documentation updates
+│   ├── v1.17/                                  # v1.17.0 version-specific guides
+│   │   ├── QUICK-REFERENCE.md                  # Quick commands and v1.17 snippets for EKS
+│   │   └── DOCUMENTATION-SUMMARY.md            # Summary of v1.17.0 documentation updates
+│   └── v1.18/                                  # v1.18.0 version-specific guides
+│       ├── how-to-cp-and-dp-eks-setup-guide.md # 1.18 CP + DP setup overlay
+│       ├── QUICK-REFERENCE.md                  # Quick commands and v1.18 snippets for EKS
+│       └── DOCUMENTATION-SUMMARY.md            # Summary of v1.18.0 documentation updates
 ├── scripts/                                     # Utility scripts
 │   ├── env.sh                                  # All environment variables (18 sections)
 │   └── connectivity-test-job.yaml              # Network connectivity test K8s Job
@@ -432,7 +469,9 @@ workshop-tp-eks/
 ├── docs/                                        # Additional documentation
 │   └── firewall-requirements-eks.md            # AWS/EKS firewall requirements
 └── releases/                                    # Release notes
-    └── v1.16.0.md                              # v1.16.0 release notes
+    ├── v1.16.0.md                              # v1.16.0 release notes
+    ├── v1.17.0.md                              # v1.17.0 release notes
+    └── v1.18.0.md                              # v1.18.0 release notes
 ```
 
 ## 🔑 Key Features
@@ -470,7 +509,7 @@ workshop-tp-eks/
 - **envsubst**: Part of homebrew gettext (0.24.1+)
 
 ### TIBCO Platform Components
-- **Control Plane**: v1.17.0
+- **Control Plane**: v1.18.0
 - **Data Plane**: Compatible with CP version
 - **PostgreSQL**: v16 (Amazon RDS Aurora PostgreSQL recommended)
 - **Capabilities**: BWCE, Flogo, EMS, Developer Hub
@@ -537,7 +576,7 @@ workshop-tp-eks/
 
 ### Getting Help
 1. **Run the health check pipeline first**: [`check-namespace-health.yml`](./pipelines/azure-devops/check-namespace-health.yml) produces a structured diagnostic report with remediation hints for every finding — attach the pipeline log when raising a support ticket
-2. Check the [Official TIBCO Documentation](https://docs.tibco.com/pub/platform-cp/1.17.0/doc/html/Default.htm#Installation/setting-up-cluster-for-control-plane.htm)
+2. Check the [Official TIBCO Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/setting-up-cluster-for-control-plane.htm)
 3. Review the [EKS Workshop in tp-helm-charts](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 4. Review GitHub issues in [tp-helm-charts repository](https://github.com/TIBCOSoftware/tp-helm-charts)
 5. Contact TIBCO Support for production issues
@@ -553,7 +592,7 @@ Contributions are welcome! Please:
 ## 🔗 Additional Resources
 
 ### Official Documentation
-- [TIBCO Platform Control Plane Documentation](https://docs.tibco.com/pub/platform-cp/1.17.0/doc/html/Default.htm#Installation/setting-up-cluster-for-control-plane.htm)
+- [TIBCO Platform Control Plane Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/setting-up-cluster-for-control-plane.htm)
 - [TIBCO Helm Charts Repository](https://github.com/TIBCOSoftware/tp-helm-charts)
 - [EKS Workshop in tp-helm-charts](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 

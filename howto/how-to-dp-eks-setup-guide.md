@@ -9,7 +9,7 @@ title: TIBCO Platform Data Plane Only Setup on EKS
 
 **Target Audience**: DevOps engineers, Platform administrators
 
-**Prerequisites**: Review [prerequisites-checklist-for-customer](prerequisites-checklist-for-customer.md) before starting
+**Prerequisites**: Review [prerequisites-checklist-for-customer](prerequisites-checklist-for-customer) before starting
 
 **Estimated Time**: 2-4 hours (first-time installation)
 
@@ -17,7 +17,7 @@ title: TIBCO Platform Data Plane Only Setup on EKS
 
 > **Note:** This workshop is NOT meant for production deployment.
 >
-> This guide assumes you already have a running TIBCO Control Plane. For deploying both CP and DP together, see the [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide.md).
+> This guide assumes you already have a running TIBCO Control Plane. For deploying both CP and DP together, see the [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide).
 
 ---
 
@@ -522,7 +522,7 @@ EOF
 
 > **Source:** [`tp-helm-charts/docs/workshop/eks/data-plane/README.md`](https://github.com/TIBCOSoftware/tp-helm-charts/blob/main/docs/workshop/eks/data-plane/README.md)
 
-For a detailed guide covering each component, see [Data Plane Observability on EKS](how-to-dp-eks-observability.md).
+For a detailed guide covering each component, see [Data Plane Observability on EKS](how-to-dp-eks-observability).
 
 ### Install ECK Operator
 
@@ -718,7 +718,7 @@ This value is needed to configure the OpenTelemetry endpoint in Nginx (Part 6) a
 
 Delete the Data Plane from the TIBCO Control Plane UI first to allow the CP to clean up its agent resources:
 
-[Steps to delete Data Plane](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
+[Steps to delete Data Plane](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
 
 Then run the clean-up script:
 
@@ -737,12 +737,12 @@ export TP_DELETE_CLUSTER=false
 
 ## Additional Resources
 
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm)
 - [tp-helm-charts EKS Workshop](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
-- [CP + DP Combined Setup Guide](how-to-cp-and-dp-eks-setup-guide.md)
-- [Observability Guide](how-to-dp-eks-observability.md)
-- [Route 53 DNS Guide](how-to-add-dns-records-eks-aws.md)
-- [Prerequisites Checklist](prerequisites-checklist-for-customer.md)
+- [CP + DP Combined Setup Guide](how-to-cp-and-dp-eks-setup-guide)
+- [Observability Guide](how-to-dp-eks-observability)
+- [Route 53 DNS Guide](how-to-add-dns-records-eks-aws)
+- [Prerequisites Checklist](prerequisites-checklist-for-customer)
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
 - [External DNS on AWS](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md)
 - [Kong OpenTelemetry Plugin](https://docs.konghq.com/hub/kong-inc/opentelemetry/)

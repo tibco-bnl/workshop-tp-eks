@@ -7,7 +7,7 @@ title: How to Add DNS Records for EKS on AWS
 
 This guide explains how to configure DNS records in Amazon Route 53 for TIBCO Platform deployments on EKS. It covers three approaches: AWS CLI, the Route 53 Console, and automated management via External DNS.
 
-**Last Updated**: May 2026
+**Last Updated**: June 11, 2026
 
 ---
 
@@ -56,8 +56,11 @@ The following variables are used in this guide:
 | `TP_DOMAIN` | `dp1.${TP_HOSTED_ZONE_DOMAIN}` | Primary Data Plane domain |
 | `TP_APPS_DOMAIN` | `apps.dp1.${TP_HOSTED_ZONE_DOMAIN}` | Optional user app endpoint domain |
 | `CP_INSTANCE_ID` | `cp1` | Unique ID for this CP installation |
-| `TP_MY_DOMAIN` | `${CP_INSTANCE_ID}-my.${TP_HOSTED_ZONE_DOMAIN}` | Control Plane application domain |
-| `TP_TUNNEL_DOMAIN` | `${CP_INSTANCE_ID}-tunnel.${TP_HOSTED_ZONE_DOMAIN}` | Control Plane hybrid connectivity domain |
+| `TP_BASE_DNS_DOMAIN` | `${TP_HOSTED_ZONE_DOMAIN}` | Simplified Control Plane base domain for admin, subscriptions, and tunnel path |
+| `CP_ADMIN_HOST_PREFIX` | `admin` | Platform Console hostname prefix |
+| `CP_SUBSCRIPTION` | `dev` | Example subscription hostname prefix |
+| `TP_MY_DOMAIN` | `${CP_INSTANCE_ID}-my.${TP_HOSTED_ZONE_DOMAIN}` | Legacy Control Plane application domain |
+| `TP_TUNNEL_DOMAIN` | `${CP_INSTANCE_ID}-tunnel.${TP_HOSTED_ZONE_DOMAIN}` | Legacy Control Plane hybrid connectivity domain |
 | `TP_MAIN_INGRESS_CONTROLLER` | `alb` | Ingress class used by External DNS annotation filter |
 
 The following variables are **not** in `env.sh` because they are only known after the ALB is created:
@@ -124,8 +127,32 @@ export ALB_HOSTED_ZONE_ID="Z1H1FL5HABSF5"   # ALB canonical hosted zone ID (regi
 
 **Why wildcard records (`*.domain`):** TIBCO Platform generates a unique subdomain for each capability it deploys. For example, `bwce.dp1.aws.example.com`, `flogo.dp1.aws.example.com`, `kibana.dp1.aws.example.com`. Rather than creating a separate DNS record for each capability, a single wildcard record (`*.dp1.aws.example.com`) matches all subdomains and points them all to the same ALB. Nginx or Traefik then routes each request to the correct service based on the `Host` header.
 
+For current releases, create one wildcard alias record for the simplified Control Plane base domain:
+
 ```bash
-# Create wildcard alias record for Control Plane application domain: *.cp1-my.aws.example.com
+# Create wildcard alias record for simplified Control Plane domain: *.aws.example.com
+aws route53 change-resource-record-sets \
+  --hosted-zone-id ${TP_HOSTED_ZONE_ID} \
+  --change-batch '{
+    "Changes": [{
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "*.'"${TP_BASE_DNS_DOMAIN}"'",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "'"${ALB_HOSTED_ZONE_ID}"'",
+          "DNSName": "'"${ALB_DNS_NAME}"'",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }]
+  }'
+```
+
+For legacy split-domain deployments, create separate records for `TP_MY_DOMAIN` and `TP_TUNNEL_DOMAIN`:
+
+```bash
+# Create wildcard alias record for legacy Control Plane application domain: *.cp1-my.aws.example.com
 aws route53 change-resource-record-sets \
   --hosted-zone-id ${TP_HOSTED_ZONE_ID} \
   --change-batch '{
@@ -145,7 +172,7 @@ aws route53 change-resource-record-sets \
 ```
 
 ```bash
-# Create wildcard alias record for Control Plane tunnel domain: *.cp1-tunnel.aws.example.com
+# Create wildcard alias record for legacy Control Plane tunnel domain: *.cp1-tunnel.aws.example.com
 aws route53 change-resource-record-sets \
   --hosted-zone-id ${TP_HOSTED_ZONE_ID} \
   --change-batch '{
@@ -218,7 +245,8 @@ aws route53 list-resource-record-sets \
   --output text
 
 # Test DNS resolution (allow 1-2 minutes for propagation)
-nslookup test.${TP_MY_DOMAIN}
+nslookup ${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}
+nslookup ${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}
 dig *.${TP_DOMAIN}
 ```
 
@@ -232,7 +260,7 @@ dig *.${TP_DOMAIN}
 2. Navigate to **Hosted zones** and select your domain (e.g., `aws.example.com`)
 3. Click **Create record**
 4. Configure the record:
-   - **Record name**: `*.cp1-my` (for Control Plane) or `*.dp1` (for Data Plane)
+  - **Record name**: `*` or `*.platform` for simplified Control Plane DNS, or `*.dp1` for Data Plane
    - **Record type**: **A – Routes traffic to an IPv4 address and some AWS resources**
    - **Alias**: Toggle **ON**
    - **Route traffic to**: Select **Alias to Application and Classic Load Balancer**
@@ -240,7 +268,7 @@ dig *.${TP_DOMAIN}
    - **Load balancer**: Select your ALB from the dropdown
 5. Click **Create records**
 
-Repeat for each wildcard domain needed (CP my domain, CP tunnel domain, DP domain).
+Repeat for each wildcard domain needed. For new 1.18 deployments, the Control Plane normally needs one simplified wildcard record. Legacy split-domain deployments need separate CP my-domain and tunnel-domain records.
 
 ---
 
@@ -255,7 +283,7 @@ For workshop environments where clusters are frequently created and destroyed, E
 ### How External DNS Works on EKS
 
 1. External DNS watches Kubernetes `Ingress` and `Service` objects across all namespaces
-2. When an `Ingress` has the annotation `external-dns.alpha.kubernetes.io/hostname: "*.cp1-my.aws.example.com"`, External DNS creates an A alias record in Route 53 pointing to the ALB
+2. When an `Ingress` has the annotation `external-dns.alpha.kubernetes.io/hostname: "*.aws.example.com"`, External DNS creates an A alias record in Route 53 pointing to the ALB
 3. The `--annotation-filter` flag restricts External DNS to only process `Ingress` objects that have the `kubernetes.io/ingress.class: alb` annotation, preventing it from accidentally managing non-ALB ingresses
 4. When the `Ingress` is deleted, External DNS removes the Route 53 record
 
@@ -319,12 +347,13 @@ aws route53 list-resource-record-sets \
 
 | Record | Type | Target | Purpose |
 |:-------|:-----|:-------|:--------|
-| `*.${TP_MY_DOMAIN}` | A (Alias) | ALB DNS name | Control Plane application traffic (CP UI, APIs) |
-| `*.${TP_TUNNEL_DOMAIN}` | A (Alias) | ALB DNS name | Control Plane hybrid connectivity (DP registration tunnel) |
+| `*.${TP_BASE_DNS_DOMAIN}` | A (Alias) | ALB DNS name | Simplified Control Plane traffic: admin, subscriptions, APIs, and `/infra/tunnel` |
+| `*.${TP_MY_DOMAIN}` | A (Alias) | ALB DNS name | Legacy Control Plane application traffic (CP UI, APIs) |
+| `*.${TP_TUNNEL_DOMAIN}` | A (Alias) | ALB DNS name | Legacy Control Plane hybrid connectivity |
 | `*.${TP_DOMAIN}` | A (Alias) | ALB DNS name | Data Plane services and capabilities (BWCE, Flogo, EMS, Kibana, Grafana) |
 | `*.${TP_APPS_DOMAIN}` | A (Alias) | ALB DNS name | Data Plane user app endpoints via Kong (optional) |
 
-> **Note on the tunnel domain:** The `*.${TP_TUNNEL_DOMAIN}` record is used by the TIBCO Control Plane to establish a secure WebSocket tunnel to each registered Data Plane. If this record is missing or pointing to the wrong ALB, Data Plane registration will fail with a timeout error.
+> **Note on tunnel traffic:** With simplified DNS, tunnel traffic uses the same base domain and is routed by path under `/infra/tunnel`. The `*.${TP_TUNNEL_DOMAIN}` record is only needed for legacy split-domain deployments.
 
 ---
 
@@ -363,7 +392,7 @@ Route 53 record propagation typically takes 30-60 seconds, but can take up to 2 
 
 ```bash
 # Test from outside using Google's public DNS resolver
-nslookup test.${TP_MY_DOMAIN} 8.8.8.8
+nslookup ${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN} 8.8.8.8
 
 # Or use dig with a short timeout
 dig +short *.${TP_DOMAIN} @8.8.8.8
@@ -407,5 +436,5 @@ Common causes:
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
 - [ALB Canonical Hosted Zone IDs](https://docs.aws.amazon.com/general/latest/gr/elb.html)
 - [Route 53 Alias Records](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-choosing-alias-non-alias.html)
-- [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide.md)
-- [Prerequisites Checklist](prerequisites-checklist-for-customer.md)
+- [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide)
+- [Prerequisites Checklist](prerequisites-checklist-for-customer)

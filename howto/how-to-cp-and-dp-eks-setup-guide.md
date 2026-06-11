@@ -9,20 +9,22 @@ title: TIBCO Platform Control Plane and Data Plane Setup on EKS
 
 **Target Audience**: DevOps engineers, Platform administrators
 
-**Prerequisites**: Review [prerequisites-checklist-for-customer](prerequisites-checklist-for-customer.md) before starting
+**Prerequisites**: Review [prerequisites-checklist-for-customer](prerequisites-checklist-for-customer) before starting
 
 **Estimated Time**: 4-6 hours (first-time installation)
 
-**Last Updated**: May 2026 (v1.17.0)
+**Last Updated**: June 11, 2026 (v1.18.0)
 
 > **Note:** This workshop is NOT meant for production deployment.
 
-> **Version 1.17.0 Update**: This guide is updated for TIBCO Platform 1.17.0. Key changes from 1.16.0:
-> - **Simplified DNS Structure** (recommended): Single base domain for admin, subscription, and tunnel — one ACM certificate, fewer DNS records
-> - Updated `tibco-cp-base` chart to version 1.17.0
-> - Updated `dp-config-aws` chart to version 1.17.x
-> - Enhanced OTEL observability configuration
-> - BW5CE/BWCE V2 job templates for parallel provisioner execution
+> **Version note:** This is the shared EKS CP+DP baseline guide. It now includes the 1.17.0 simplified DNS updates and the current 1.18.0 Control Plane guidance. For release-specific overlays, start with [v1.17](./v1.17/DOCUMENTATION-SUMMARY) or [v1.18](./v1.18/how-to-cp-and-dp-eks-setup-guide).
+
+> **Version 1.18.0 Update**: Key changes from 1.17.0:
+> - Gateway API controller support for Control Tower data planes; EKS Traefik users can evaluate Gateway API endpoint exposure where capabilities support it
+> - Namespace-level RBAC for Data Plane resources; Application Manager and Application Viewer grants may need namespace assignments
+> - Email server configuration moved from `tibco-cp-base` Helm values to the TIBCO Platform Console
+> - Simplified DNS remains recommended: one Route 53 base domain, one wildcard ACM certificate, and tunnel traffic routed on the shared domain
+> - Updated `tibco-cp-base` chart to version 1.18.0
 
 ---
 
@@ -138,7 +140,9 @@ The complete list of variables used in this guide, organized by purpose. All are
 | `TP_DB_SSL_CERT_KEY` | `rds-ca-bundle.pem` | Key (filename) inside the SSL cert secret |
 | `TP_DB_SSL_ROOT_CERT_PATH` | `/etc/ssl/certs/rds-ca-bundle.pem` | Mount path for the CA cert inside CP pods |
 
-**Email (set before deploying tibco-cp-base)**
+**Email (configure after deploying tibco-cp-base in 1.18.0)**
+
+In TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 Helm values file.
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
@@ -727,16 +731,16 @@ Choose **one** DNS approach that matches what you configured in `scripts/env.sh`
 
 Follow: [Route 53 domain registration guide](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/domain-register.html)
 
-See also: [How to Add DNS Records for EKS](how-to-add-dns-records-eks-aws.md)
+See also: [How to Add DNS Records for EKS](how-to-add-dns-records-eks-aws)
 
 ---
 
-### 🔷 Approach 1: Simplified DNS (Recommended for v1.17.0)
+### 🔷 Approach 1: Simplified DNS (Recommended for v1.17.0 and later)
 
 **Results in:**
 - Admin UI: `https://admin.${TP_HOSTED_ZONE_DOMAIN}`
 - Subscription portal: `https://dev.${TP_HOSTED_ZONE_DOMAIN}`
-- Tunnel (if hybrid enabled): `https://tunnel.${TP_HOSTED_ZONE_DOMAIN}`
+- Tunnel (if hybrid enabled): same base domain, routed by `/infra/tunnel` path
 - **One** wildcard ACM certificate: `*.${TP_HOSTED_ZONE_DOMAIN}`
 
 **Benefits:** Single certificate, simpler DNS records, ~50% fewer AWS resources when hybrid-proxy is disabled.
@@ -754,7 +758,7 @@ Request one wildcard certificate for: `*.${TP_HOSTED_ZONE_DOMAIN}`
 export TP_BASE_DOMAIN_CERT_ARN="arn:aws:acm:us-west-2:123456789012:certificate/xxx"
 ```
 
-> **Note:** External DNS will create the specific Route 53 A-records automatically (`admin.xxx`, `dev.xxx`, `tunnel.xxx`) when the ingress objects are created in Parts 8–9. No manual DNS record creation is needed.
+> **Note:** External DNS creates the wildcard Route 53 alias record automatically when the ingress object is created in Part 8. That wildcard covers the Platform Console, subscriptions, and the hybrid tunnel path on the same base domain.
 
 ---
 
@@ -1003,7 +1007,7 @@ kubectl get ingressclass
 | EFS storage class | `efs-sc` | Used for CP persistent storage |
 | RDS DB instance ARN (CLI) | `arn:aws:rds:<region>:<account>:db:${TP_CLUSTER_NAME}-db` | Connection details |
 | RDS details (Crossplane) | Secret `${CP_INSTANCE_ID}-aurora-details` in `${CP_INSTANCE_ID}-ns` | |
-| Network Policies | [CP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#Installation/control-plane-network-policies.htm) | |
+| Network Policies | [CP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/control-plane-network-policies.htm) | |
 
 ### Create Namespace and Service Account (CLI method only)
 
@@ -1029,7 +1033,7 @@ kubectl create serviceaccount ${CP_INSTANCE_ID}-sa -n ${CP_INSTANCE_ID}-ns
 
 **Why:** The TIBCO Control Plane router pods use these cryptographic keys to sign and verify user session tokens. `TSC_SESSION_KEY` signs tokens for the TSC (TIBCO Subscription Console) domain. `DOMAIN_SESSION_KEY` signs tokens for custom domain routing. Without this secret, the router pods crash on startup with a missing secret error. The keys must remain stable across upgrades — if they change, all active user sessions are immediately invalidated.
 
-Reference: [TIBCO CP secret requirements](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
+Reference: [TIBCO CP secret requirements](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
 
 ```bash
 export TSC_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
@@ -1070,21 +1074,17 @@ echo "DB Host: ${TP_DB_HOST}"
 #   -o jsonpath='{.data.endpoint}' | base64 --decode)
 ```
 
-Set email and admin variables (all defined in `scripts/env.sh`):
+Set admin variables and record email settings for the Console (all defined in `scripts/env.sh`):
 
 ```bash
-# Email configuration — choose one server type
+# Email configuration moved to Platform Console in TIBCO Platform 1.18.0.
+# Keep these values available for the post-install Console configuration, but do not
+# include the deprecated emailServerType/emailServer Helm values in 1.18.0 values.
 export TP_EMAIL_SERVER_TYPE="ses"                       # "ses", "smtp", or "sendgrid"
 export TP_FROM_EMAIL="noreply@${TP_HOSTED_ZONE_DOMAIN}" # From address for CP notifications
 
 # SES — set the SES identity ARN (must be in the same or allowed region)
 export TP_SES_ARN="arn:aws:ses:us-east-1:$(aws sts get-caller-identity --query Account --output text):identity/${TP_FROM_EMAIL}"
-
-# SMTP — alternative to SES
-# export TP_SMTP_SERVER="smtp.office365.com"
-# export TP_SMTP_PORT="587"
-# export TP_SMTP_USERNAME="your-smtp-user@company.com"
-# export TP_SMTP_PASSWORD="your-smtp-password"
 
 # Admin user — the initial bootstrapped admin for the CP UI
 export TP_ADMIN_EMAIL="admin@${TP_HOSTED_ZONE_DOMAIN}"
@@ -1095,7 +1095,7 @@ export TP_ADMIN_INITIAL_PASSWORD="ChangeMeNow!1"   # Must be changed after first
 
 ### Generate tibco-cp-base Values File
 
-**Why:** The `tibco-cp-base` chart (v1.17.0) is the main TIBCO Control Plane Helm chart. It deploys the router, orchestrator, hybrid proxy, and all CP microservices. Generating a file (rather than passing all values inline) keeps the configuration auditable and re-usable across upgrades.
+**Why:** The `tibco-cp-base` chart (v1.18.0) is the main TIBCO Control Plane Helm chart. It deploys the router, orchestrator, hybrid proxy, and all CP microservices. Generating a file (rather than passing all values inline) keeps the configuration auditable and re-usable across upgrades.
 
 > **Source:** [`tp-helm-charts/charts/tibco-cp-base/values.yaml`](https://github.com/TIBCOSoftware/tp-helm-charts/blob/main/charts/tibco-cp-base/values.yaml)
 
@@ -1110,7 +1110,8 @@ The key differences from legacy DNS:
 - `adminHostPrefix` tells the router which subdomain serves the admin UI
 - `hybridConnectivity.enabled` controls whether the hybrid-proxy is deployed
 - Router ingress lists specific hosts (`admin.xxx`, `dev.xxx`) instead of a wildcard
-- Hybrid proxy ingress uses `tunnel.${TP_BASE_DNS_DOMAIN}` on the same ALB
+- Hybrid proxy traffic is routed on the subscription host under `/infra/tunnel`
+- Email server settings are intentionally omitted from 1.18.0 Helm values and configured in the Platform Console
 
 ```bash
 cat > aws-tibco-cp-base-values.yaml <(envsubst \
@@ -1118,18 +1119,16 @@ cat > aws-tibco-cp-base-values.yaml <(envsubst \
    ${TP_CONTAINER_REGISTRY_PASSWORD}, ${CP_INSTANCE_ID}, ${CP_ADMIN_HOST_PREFIX}, ${CP_SUBSCRIPTION},
    ${CP_HYBRID_CONNECTIVITY}, ${TP_BASE_DNS_DOMAIN},
    ${TP_VPC_CIDR}, ${TP_SERVICE_CIDR}, ${TP_STORAGE_CLASS_EFS}, ${TP_INGRESS_CONTROLLER},
-   ${TP_DB_HOST}, ${TP_DB_NAME}, ${TP_DB_PORT}, ${TP_DB_USERNAME}, ${TP_DB_PASSWORD}, ${TP_DB_SSL_MODE},
-   ${TP_EMAIL_SERVER_TYPE}, ${TP_FROM_EMAIL}, ${TP_EMAIL_CC_ADDRESSES}, ${TP_REPORTS_EMAIL_ALIAS},
-   ${TP_SES_ARN}, ${TP_SMTP_SERVER}, ${TP_SMTP_PORT}, ${TP_SMTP_USERNAME}, ${TP_SMTP_PASSWORD},
-   ${TP_SENDGRID_API_KEY}, ${TP_ADMIN_EMAIL}, ${TP_ADMIN_FIRSTNAME}, ${TP_ADMIN_LASTNAME},
+  ${TP_DB_HOST}, ${TP_DB_NAME}, ${TP_DB_PORT}, ${TP_DB_USERNAME}, ${TP_DB_PASSWORD}, ${TP_DB_SSL_MODE},
+  ${TP_ADMIN_EMAIL}, ${TP_ADMIN_FIRSTNAME}, ${TP_ADMIN_LASTNAME},
    ${TP_ADMIN_INITIAL_PASSWORD}, ${TP_ADMIN_CUSTOMER_ID},
    ${TP_HTTP_PROXY}, ${TP_HTTPS_PROXY}, ${TP_NO_PROXY},
    ${TP_LOGSERVER_ENDPOINT}, ${TP_LOGSERVER_INDEX}, ${TP_LOGSERVER_USERNAME}, ${TP_LOGSERVER_PASSWORD}' \
   << 'EOF'
 # =============================================================================
 # SIMPLIFIED DNS — SECTION 1: HYBRID PROXY
-# Enabled when CP_HYBRID_CONNECTIVITY=true. The tunnel endpoint is a subdomain
-# of the same base domain (tunnel.${TP_BASE_DNS_DOMAIN}) — no separate domain needed.
+# Enabled when CP_HYBRID_CONNECTIVITY=true. Tunnel traffic uses the same base
+# domain and the /infra/tunnel path — no separate domain needed.
 # Set enabled: false to disable hybrid-proxy and save ~50% CPU/RAM.
 # =============================================================================
 hybrid-proxy:
@@ -1138,9 +1137,9 @@ hybrid-proxy:
     enabled: ${CP_HYBRID_CONNECTIVITY}
     ingressClassName: "${TP_INGRESS_CONTROLLER}"
     hosts:
-      - host: 'tunnel.${TP_BASE_DNS_DOMAIN}'
+      - host: '${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}'
         paths:
-          - path: /
+          - path: /infra/tunnel
             pathType: Prefix
             port: 105
 
@@ -1228,21 +1227,6 @@ global:
     db_secret_name: "provider-cp-database-credentials"
     db_ssl_mode: "${TP_DB_SSL_MODE}"
 
-    emailServerType: "${TP_EMAIL_SERVER_TYPE}"
-    fromAndReplyToEmailAddress: "${TP_FROM_EMAIL}"
-    platformEmailNotificationCcAddresses: "${TP_EMAIL_CC_ADDRESSES}"
-    cronJobReportsEmailAlias: "${TP_REPORTS_EMAIL_ALIAS}"
-    emailServer:
-      ses:
-        arn: "${TP_SES_ARN}"
-      smtp:
-        server: "${TP_SMTP_SERVER}"
-        port: "${TP_SMTP_PORT}"
-        username: "${TP_SMTP_USERNAME}"
-        password: "${TP_SMTP_PASSWORD}"
-      sendgrid:
-        apiKey: "${TP_SENDGRID_API_KEY}"
-
     admin:
       email: "${TP_ADMIN_EMAIL}"
       firstname: "${TP_ADMIN_FIRSTNAME}"
@@ -1273,10 +1257,8 @@ cat > aws-tibco-cp-base-values.yaml <(envsubst \
   '${TP_ENABLE_NETWORK_POLICY}, ${TP_CONTAINER_REGISTRY_URL}, ${TP_CONTAINER_REGISTRY_USER},
    ${TP_CONTAINER_REGISTRY_PASSWORD}, ${CP_INSTANCE_ID}, ${TP_TUNNEL_DOMAIN}, ${TP_MY_DOMAIN},
    ${TP_VPC_CIDR}, ${TP_SERVICE_CIDR}, ${TP_STORAGE_CLASS_EFS}, ${TP_INGRESS_CONTROLLER},
-   ${TP_DB_HOST}, ${TP_DB_NAME}, ${TP_DB_PORT}, ${TP_DB_USERNAME}, ${TP_DB_PASSWORD}, ${TP_DB_SSL_MODE},
-   ${TP_EMAIL_SERVER_TYPE}, ${TP_FROM_EMAIL}, ${TP_EMAIL_CC_ADDRESSES}, ${TP_REPORTS_EMAIL_ALIAS},
-   ${TP_SES_ARN}, ${TP_SMTP_SERVER}, ${TP_SMTP_PORT}, ${TP_SMTP_USERNAME}, ${TP_SMTP_PASSWORD},
-   ${TP_SENDGRID_API_KEY}, ${TP_ADMIN_EMAIL}, ${TP_ADMIN_FIRSTNAME}, ${TP_ADMIN_LASTNAME},
+  ${TP_DB_HOST}, ${TP_DB_NAME}, ${TP_DB_PORT}, ${TP_DB_USERNAME}, ${TP_DB_PASSWORD}, ${TP_DB_SSL_MODE},
+  ${TP_ADMIN_EMAIL}, ${TP_ADMIN_FIRSTNAME}, ${TP_ADMIN_LASTNAME},
    ${TP_ADMIN_INITIAL_PASSWORD}, ${TP_ADMIN_CUSTOMER_ID},
    ${TP_HTTP_PROXY}, ${TP_HTTPS_PROXY}, ${TP_NO_PROXY},
    ${TP_LOGSERVER_ENDPOINT}, ${TP_LOGSERVER_INDEX}, ${TP_LOGSERVER_USERNAME}, ${TP_LOGSERVER_PASSWORD}' \
@@ -1377,21 +1359,6 @@ global:
     db_password: "${TP_DB_PASSWORD}"
     db_secret_name: "provider-cp-database-credentials"
     db_ssl_mode: "${TP_DB_SSL_MODE}"
-
-    emailServerType: "${TP_EMAIL_SERVER_TYPE}"
-    fromAndReplyToEmailAddress: "${TP_FROM_EMAIL}"
-    platformEmailNotificationCcAddresses: "${TP_EMAIL_CC_ADDRESSES}"
-    cronJobReportsEmailAlias: "${TP_REPORTS_EMAIL_ALIAS}"
-    emailServer:
-      ses:
-        arn: "${TP_SES_ARN}"
-      smtp:
-        server: "${TP_SMTP_SERVER}"
-        port: "${TP_SMTP_PORT}"
-        username: "${TP_SMTP_USERNAME}"
-        password: "${TP_SMTP_PASSWORD}"
-      sendgrid:
-        apiKey: "${TP_SENDGRID_API_KEY}"
 
     admin:
       email: "${TP_ADMIN_EMAIL}"
@@ -1567,7 +1534,7 @@ kubectl run ssl-test --rm -it --restart=Never \
 helm upgrade --install --wait --timeout 2h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
   --labels layer=1 \
-  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.17.0" \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
   -f aws-tibco-cp-base-values.yaml
 ```
 
@@ -1581,9 +1548,10 @@ kubectl get pods -n ${CP_INSTANCE_ID}-ns
 1. Navigate to `https://${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}` (simplified DNS) or `https://admin.${TP_MY_DOMAIN}` (legacy DNS)
 2. Log in with `${TP_ADMIN_EMAIL}` and `${TP_ADMIN_INITIAL_PASSWORD}`
 3. Change the password on first login
-4. Create a subscription with your chosen `hostPrefix` (e.g., `dev`) to access the subscription portal
+4. Configure the email server from the Platform Console if you need SES, SMTP, or SendGrid notifications
+5. Create a subscription with your chosen `hostPrefix` (e.g., `dev`) to access the subscription portal
 
-Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
+Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
 
 ---
 
@@ -1591,7 +1559,7 @@ Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/pl
 
 > **Source:** [tp-helm-charts/docs/workshop/eks/data-plane/README.md](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/data-plane)
 
-For a dedicated Data Plane cluster, see the [Data Plane Only Setup Guide](how-to-dp-eks-setup-guide.md). For a shared cluster (CP + DP on same EKS cluster), follow the steps below.
+For a dedicated Data Plane cluster, see the [Data Plane Only Setup Guide](how-to-dp-eks-setup-guide). For a shared cluster (CP + DP on same EKS cluster), follow the steps below.
 
 ### Export Data Plane Variables
 
@@ -1690,7 +1658,7 @@ kubectl get ingress -n ingress-system nginx | awk 'NR==2 { print $3 }'
 | Ingress class name | `nginx` | Used for BWCE capability Ingress objects |
 | EFS storage class | `efs-sc` | Used for BWCE artifact manager and EMS logs |
 | EBS storage class | `ebs-gp3` | Used for EMS capability data |
-| Network Policy Details | [DP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#UserGuide/controlling-traffic-with-network-policies.htm) | |
+| Network Policy Details | [DP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/controlling-traffic-with-network-policies.htm) | |
 
 ---
 
@@ -1698,7 +1666,7 @@ kubectl get ingress -n ingress-system nginx | awk 'NR==2 { print $3 }'
 
 > **Source:** [tp-helm-charts/docs/workshop/eks/data-plane/README.md — Install Observability tools](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/data-plane#install-observability-tools)
 
-For a detailed observability setup guide, see [Data Plane Observability on EKS](how-to-dp-eks-observability.md).
+For a detailed observability setup guide, see [Data Plane Observability on EKS](how-to-dp-eks-observability).
 
 ### Install Elastic Stack (ECK)
 
@@ -1846,9 +1814,9 @@ kubectl get ingress -n prometheus-system kube-prometheus-stack-grafana \
 
 **Why the order matters:** Data Planes must be deleted from the CP UI first (so TIBCO CP can cleanly remove namespace configuration). Then CP is uninstalled. Then AWS resources (EFS, RDS, security groups) are deleted. Finally, the EKS cluster is deleted. Reversing this order can leave orphaned AWS resources or EKS finalizers that block deletion.
 
-1. **Delete TIBCO Control Plane** — follow [TIBCO CP uninstall guide](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#Installation/uninstalling-tibco-control-plane.htm)
+1. **Delete TIBCO Control Plane** — follow [TIBCO CP uninstall guide](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/uninstalling-tibco-control-plane.htm)
 
-2. **Delete TIBCO Data Plane** — delete from CP UI first: [DP deletion guide](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
+2. **Delete TIBCO Data Plane** — delete from CP UI first: [DP deletion guide](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
 
 3. **Run clean-up scripts:**
 
@@ -1868,14 +1836,14 @@ export CP_RESOURCE_PREFIX=platform   # Required if you used Crossplane to create
 
 ## Additional Resources
 
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm)
 - [tp-helm-charts EKS Workshop](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 - [eksctl Documentation](https://eksctl.io/)
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
 - [External DNS on AWS](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md)
 - [AWS Certificate Manager](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)
-- [Data Plane Only Setup Guide](how-to-dp-eks-setup-guide.md)
-- [Observability Guide](how-to-dp-eks-observability.md)
-- [Route 53 DNS Guide](how-to-add-dns-records-eks-aws.md)
-- [Prerequisites Checklist](prerequisites-checklist-for-customer.md)
+- [Data Plane Only Setup Guide](how-to-dp-eks-setup-guide)
+- [Observability Guide](how-to-dp-eks-observability)
+- [Route 53 DNS Guide](how-to-add-dns-records-eks-aws)
+- [Prerequisites Checklist](prerequisites-checklist-for-customer)
 - [Environment Variables Reference](../scripts/env.sh)

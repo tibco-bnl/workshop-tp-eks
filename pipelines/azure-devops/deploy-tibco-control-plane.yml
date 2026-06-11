@@ -19,7 +19,7 @@
 #   1. EKS cluster is running with all dependencies installed:
 #      - AWS Load Balancer Controller, External DNS, EFS CSI driver
 #      - Nginx or Traefik ingress controller
-#      - ACM certificates issued for *.${TP_MY_DOMAIN} and *.${TP_TUNNEL_DOMAIN}
+#      - ACM certificate issued for *.${TP_BASE_DNS_DOMAIN}
 #      - RDS Aurora PostgreSQL cluster is running
 #      - EFS file system is created and StorageClass exists
 #   2. Run test-postgres-connectivity.yml first to validate DB reachability.
@@ -72,9 +72,9 @@ parameters:
 
   # --- Helm chart ---
   - name: helmChartVersion
-    displayName: 'tibco-cp-base chart version constraint (e.g. ^1.0.0)'
+    displayName: 'tibco-cp-base chart version'
     type: string
-    default: '^1.0.0'
+    default: '1.18.0'
 
   - name: helmReleaseName
     displayName: 'Helm release name'
@@ -98,13 +98,19 @@ parameters:
     type: string
     default: 'aws.example.com'
 
+  - name: baseDomainCertArn
+    displayName: 'ACM Certificate ARN for *.${HOSTED_ZONE}'
+    type: string
+    default: ''
+
+  # Legacy split-domain parameters, retained for older deployments.
   - name: myDomainCertArn
-    displayName: 'ACM Certificate ARN for *.${CP_INSTANCE_ID}-my.${HOSTED_ZONE}'
+    displayName: 'Legacy ACM Certificate ARN for *.${CP_INSTANCE_ID}-my.${HOSTED_ZONE}'
     type: string
     default: ''
 
   - name: tunnelDomainCertArn
-    displayName: 'ACM Certificate ARN for *.${CP_INSTANCE_ID}-tunnel.${HOSTED_ZONE}'
+    displayName: 'Legacy ACM Certificate ARN for *.${CP_INSTANCE_ID}-tunnel.${HOSTED_ZONE}'
     type: string
     default: ''
 
@@ -180,9 +186,13 @@ parameters:
       - require
       - verify-full
 
-  # --- Email ---
+  # --- Email reference values ---
+  # TIBCO Platform 1.18.0 configures SES/SMTP/SendGrid in Platform Console
+  # after installation. These parameters are retained for operator reference
+  # and optional network-policy port planning; they are not emitted as Helm
+  # global.external.emailServer* values.
   - name: emailServerType
-    displayName: 'Email Server Type'
+    displayName: 'Email Server Type for post-install Console configuration'
     type: string
     default: 'ses'
     values:
@@ -192,17 +202,17 @@ parameters:
       - ''
 
   - name: fromEmail
-    displayName: 'From Email Address for CP notifications'
+    displayName: 'From Email Address for post-install Console configuration'
     type: string
     default: ''
 
   - name: sesArn
-    displayName: 'SES Identity ARN (for emailServerType=ses)'
+    displayName: 'SES Identity ARN for post-install Console configuration'
     type: string
     default: ''
 
   - name: smtpServer
-    displayName: 'SMTP Server (for emailServerType=smtp)'
+    displayName: 'SMTP Server for post-install Console configuration'
     type: string
     default: ''
 
@@ -328,10 +338,7 @@ stages:
 
               check_required "dbHost"              "${{ parameters.dbHost }}"
               check_required "adminEmail"          "${{ parameters.adminEmail }}"
-              check_required "fromEmail"           "${{ parameters.fromEmail }}"
               check_required "containerRegistryUser" "${{ parameters.containerRegistryUser }}"
-              check_required "myDomainCertArn"     "${{ parameters.myDomainCertArn }}"
-              check_required "tunnelDomainCertArn" "${{ parameters.tunnelDomainCertArn }}"
 
               if [ ${ERRORS} -gt 0 ]; then
                 echo ""
@@ -625,8 +632,9 @@ stages:
 
               # Compute derived values
               CP_ID="${{ parameters.cpInstanceId }}"
-              MY_DOMAIN="${CP_ID}-my.${{ parameters.hostedZoneDomain }}"
-              TUNNEL_DOMAIN="${CP_ID}-tunnel.${{ parameters.hostedZoneDomain }}"
+              BASE_DOMAIN="${{ parameters.hostedZoneDomain }}"
+              ADMIN_HOST="admin.${BASE_DOMAIN}"
+              SUBSCRIPTION_HOST="dev.${BASE_DOMAIN}"
 
               # Determine SSL root cert path for verify-full mode
               DB_SSL_ROOT_CERT=""
@@ -657,7 +665,12 @@ stages:
                   enabled: true
                   ingressClassName: "${{ parameters.ingressController }}"
                   hosts:
-                    - host: "*.${MY_DOMAIN}"
+                    - host: "${ADMIN_HOST}"
+                      paths:
+                        - path: /
+                          pathType: Prefix
+                          port: 100
+                    - host: "${SUBSCRIPTION_HOST}"
                       paths:
                         - path: /
                           pathType: Prefix
@@ -676,8 +689,8 @@ stages:
                 #   loadBalancerClass: "service.k8s.aws/nlb"
                 #   allocateLoadBalancerNodePorts: false
                 #   annotations:
-                #     external-dns.alpha.kubernetes.io/hostname: "*.${TUNNEL_DOMAIN}"
-                #     service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "${{ parameters.tunnelDomainCertArn }}"
+                #     external-dns.alpha.kubernetes.io/hostname: "*.${BASE_DOMAIN}"
+                #     service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "${{ parameters.baseDomainCertArn }}"
                 #     service.beta.kubernetes.io/aws-load-balancer-type: external
                 #     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
                 #     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
@@ -744,8 +757,8 @@ stages:
                   # =============================================================
                   # SECTION 9: DOMAIN CONFIGURATION
                   # =============================================================
-                  dnsDomain: "${MY_DOMAIN}"
-                  dnsTunnelDomain: "${TUNNEL_DOMAIN}"
+                  dnsDomain: "${BASE_DOMAIN}"
+                  dnsTunnelDomain: "${BASE_DOMAIN}"
 
                   # =============================================================
                   # SECTION 10: DATABASE
@@ -770,23 +783,7 @@ stages:
               cat >> "${VALUES_FILE}" << HELMEOF2
 
                   # =============================================================
-                  # SECTION 11: EMAIL CONFIGURATION
-                  # =============================================================
-                  emailServerType: "${{ parameters.emailServerType }}"
-                  fromAndReplyToEmailAddress: "${{ parameters.fromEmail }}"
-                  emailServer:
-                    ses:
-                      arn: "${{ parameters.sesArn }}"
-                    smtp:
-                      server: "${{ parameters.smtpServer }}"
-                      port: "${{ parameters.smtpPort }}"
-                      username: "${{ parameters.smtpUsername }}"
-                      password: "${TP_SMTP_PASSWORD}"
-                    sendgrid:
-                      apiKey: "${TP_SENDGRID_API_KEY}"
-
-                  # =============================================================
-                  # SECTION 12: INITIAL ADMIN USER
+                  # SECTION 11: INITIAL ADMIN USER
                   # =============================================================
                   admin:
                     email: "${{ parameters.adminEmail }}"
@@ -796,13 +793,13 @@ stages:
                   adminInitialPassword: "${TP_ADMIN_INITIAL_PASSWORD}"
 
                   # =============================================================
-                  # SECTION 13: STORAGE
+                  # SECTION 12: STORAGE
                   # =============================================================
                   storage:
                     storageClassName: "${{ parameters.storageClassEfs }}"
 
                   # =============================================================
-                  # SECTION 14: LOG SERVER
+                  # SECTION 13: LOG SERVER
                   # =============================================================
                   logserver:
                     endpoint: "${{ parameters.logserverEndpoint }}"
@@ -921,7 +918,7 @@ stages:
 
               NS="$(cpNamespace)"
               CP_ID="${{ parameters.cpInstanceId }}"
-              MY_DOMAIN="${CP_ID}-my.${{ parameters.hostedZoneDomain }}"
+              BASE_DOMAIN="${{ parameters.hostedZoneDomain }}"
               RELEASE="${{ parameters.helmReleaseName }}"
 
               echo "=== Pod Status in ${NS} ==="
@@ -968,7 +965,7 @@ stages:
               set -euo pipefail
 
               CP_ID="${{ parameters.cpInstanceId }}"
-              MY_DOMAIN="${CP_ID}-my.${{ parameters.hostedZoneDomain }}"
+              BASE_DOMAIN="${{ parameters.hostedZoneDomain }}"
 
               echo "============================================================"
               echo "TIBCO Control Plane Deployment Complete"
@@ -980,19 +977,19 @@ stages:
               echo "  Region         : ${{ parameters.awsRegion }}"
               echo ""
               echo "  Access URLs:"
-              echo "    Admin Portal : https://admin.${MY_DOMAIN}"
+              echo "    Admin Portal : https://admin.${BASE_DOMAIN}"
               echo "      (adminHostPrefix defaults to 'admin' in tibco-cp-base values;"
               echo "       configurable via global.tibco.adminHostPrefix)"
               echo ""
               echo "  Admin Login (Step 1 — first login):"
-              echo "    URL      : https://admin.${MY_DOMAIN}/admin/login"
+              echo "    URL      : https://admin.${BASE_DOMAIN}/admin/login"
               echo "    Email    : ${{ parameters.adminEmail }}"
               echo "    Password : <set in pipeline secret TP_ADMIN_INITIAL_PASSWORD>"
               echo "    Action   : Log in, change the initial password, then create a subscription."
               echo ""
               echo "  Subscription Portal (Step 2 — after creating a subscription):"
-              echo "    URL      : https://<hostPrefix>.${MY_DOMAIN}"
-              echo "    Example  : https://mycompany.${MY_DOMAIN}"
+              echo "    URL      : https://<hostPrefix>.${BASE_DOMAIN}"
+              echo "    Example  : https://mycompany.${BASE_DOMAIN}"
               echo "    Note     : <hostPrefix> is set when creating the subscription in the"
               echo "               Admin Portal. This is the main CP UI used to:"
               echo "               - Register Data Planes"
@@ -1000,12 +997,12 @@ stages:
               echo "               - Manage users and organizations"
               echo ""
               echo "  Next Steps:"
-              echo "    1. Log in to Admin Portal: https://admin.${MY_DOMAIN}/admin/login"
+              echo "    1. Log in to Admin Portal: https://admin.${BASE_DOMAIN}/admin/login"
               echo "    2. Change the initial admin password"
               echo "    3. Create a subscription (set hostPrefix = your company/org name)"
-              echo "    4. Log in to the Subscription Portal: https://<hostPrefix>.${MY_DOMAIN}"
-              echo "    5. Register a Data Plane via: howto/how-to-dp-eks-setup-guide.md"
-              echo "    6. Configure observability: howto/how-to-dp-eks-observability.md"
+              echo "    4. Log in to the Subscription Portal: https://<hostPrefix>.${BASE_DOMAIN}"
+              echo "    5. Register a Data Plane via: howto/how-to-dp-eks-setup-guide"
+              echo "    6. Configure observability: howto/how-to-dp-eks-observability"
               echo ""
               echo "  Important — Backup these secrets to Azure Key Vault:"
               echo "    - session-keys (invalidates all user sessions if lost)"

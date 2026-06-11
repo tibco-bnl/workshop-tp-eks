@@ -225,7 +225,7 @@ See [eksctl minimum IAM policies](https://eksctl.io/usage/minimum-iam-policies/)
 | `proxy.golang.org` | 443 | HTTPS | Go module proxy (required for Flogo) |
 | `sum.golang.org` | 443 | HTTPS | Go checksum database (required for Flogo) |
 
-See [Firewall Requirements](../docs/firewall-requirements-eks.md) for the complete list.
+See [Firewall Requirements](../docs/firewall-requirements-eks) for the complete list.
 
 ---
 
@@ -235,7 +235,7 @@ See [Firewall Requirements](../docs/firewall-requirements-eks.md) for the comple
 |-------------|---------|
 | **Helm Repo URL** | `https://tibcosoftware.github.io/tp-helm-charts` |
 | **Add Repository** | `helm repo add tibco-platform https://tibcosoftware.github.io/tp-helm-charts` |
-| **TIBCO CP Base Chart** | `tibco-cp-base` version `1.16.0` |
+| **TIBCO CP Base Chart** | `tibco-cp-base` version `1.18.0` |
 | **dp-config-aws Chart** | `dp-config-aws` version `^1.0.0` |
 
 ---
@@ -316,9 +316,9 @@ Before beginning installation, verify each item:
 
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html)
 - [eksctl Documentation](https://eksctl.io/)
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm)
 - [AWS Certificate Manager Guide](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)
 - [Amazon Route 53 Developer Guide](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html)
-- [Firewall Requirements](../docs/firewall-requirements-eks.md)
-- [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide.md)
-- [Data Plane Only Setup Guide](how-to-dp-eks-setup-guide.md)
+- [Firewall Requirements](../docs/firewall-requirements-eks)
+- [CP and DP Setup Guide](how-to-cp-and-dp-eks-setup-guide)
+- [Data Plane Only Setup Guide](how-to-dp-eks-setup-guide)
