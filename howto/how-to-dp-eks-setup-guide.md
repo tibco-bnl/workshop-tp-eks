@@ -240,6 +240,8 @@ EBS (`ReadWriteOnce`) cannot satisfy this requirement because it can only be att
 
 ```bash
 cd scripts/
+curl -fsSLO https://raw.githubusercontent.com/TIBCOSoftware/tp-helm-charts/main/docs/workshop/eks/scripts/create-efs-data-plane.sh
+chmod +x create-efs-data-plane.sh
 ./create-efs-data-plane.sh
 ```
 

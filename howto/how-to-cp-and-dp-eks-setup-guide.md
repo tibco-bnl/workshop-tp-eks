@@ -422,7 +422,7 @@ EOF
 
 **Why Crossplane:** Crossplane provides a Kubernetes-native, declarative way to provision AWS infrastructure (EFS, RDS Aurora, IAM roles). Instead of running imperative shell scripts, you declare the desired AWS resources as Kubernetes CRDs (`TibcoEFSSC`, `TibcoAuroraCluster`, `TibcoRoleSA`). This enables GitOps workflows where infrastructure is version-controlled alongside application configuration.
 
-**Skip this section** if you prefer to use the AWS CLI scripts in [Part 5](#part-5-create-aws-resources).
+**Skip this section** if you prefer to use the AWS CLI scripts in [Part 5](#part-5-create-aws-resources). The AWS helper scripts referenced below are maintained upstream in the [tp-helm-charts EKS scripts directory](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/scripts), not copied into this workshop repository.
 
 ### Pre-requisite: Cluster Details ConfigMap
 
@@ -430,6 +430,8 @@ EOF
 
 ```bash
 cd scripts/
+curl -fsSLO https://raw.githubusercontent.com/TIBCOSoftware/tp-helm-charts/main/docs/workshop/eks/scripts/get-cluster-details.sh
+chmod +x get-cluster-details.sh
 ./get-cluster-details.sh
 # Creates ConfigMap "tibco-platform-infra" in kube-system with:
 #   - AWS Account ID, Region, Cluster Name
@@ -442,6 +444,8 @@ cd scripts/
 **Why:** Crossplane's AWS provider authenticates to AWS using IRSA. The role needs AdministratorAccess to create EFS, RDS clusters, and IAM roles on your behalf. The trust relationship restricts assumption to Crossplane's service account via OIDC.
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/TIBCOSoftware/tp-helm-charts/main/docs/workshop/eks/scripts/create-crossplane-role.sh
+chmod +x create-crossplane-role.sh
 ./create-crossplane-role.sh
 # Creates role: ${TP_CLUSTER_NAME}-crossplane-${TP_CLUSTER_REGION}
 # To use a custom name: export TP_CROSSPLANE_ROLE="my-crossplane-role"
@@ -551,6 +555,8 @@ Choose **one** method: AWS CLI scripts (Option A) or Crossplane claims (Option B
 
 ### Option A: Using AWS CLI Scripts
 
+The AWS CLI provisioning scripts are maintained upstream in the [tp-helm-charts EKS scripts directory](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/scripts). Download the specific script you need into your working `scripts/` directory before running it.
+
 ```bash
 cd scripts/
 ```
@@ -564,6 +570,8 @@ The creation script creates an EFS file system and configures a security group t
 Reference: [EFS CSI driver — EFS creation guide](https://github.com/kubernetes-sigs/aws-efs-csi-driver/blob/master/docs/efs-create-filesystem.md)
 
 ```bash
+curl -fsSLO https://raw.githubusercontent.com/TIBCOSoftware/tp-helm-charts/main/docs/workshop/eks/scripts/create-efs-control-plane.sh
+chmod +x create-efs-control-plane.sh
 ./create-efs-control-plane.sh
 # Note the EFS ID from the output, e.g.: fs-052ba079dbc2bffb4
 ```
@@ -576,6 +584,8 @@ Reference: [EFS CSI driver — EFS creation guide](https://github.com/kubernetes
 
 ```bash
 export TP_WAIT_FOR_RESOURCE_AVAILABLE="false"   # Set "true" to wait for RDS to be fully available before proceeding
+curl -fsSLO https://raw.githubusercontent.com/TIBCOSoftware/tp-helm-charts/main/docs/workshop/eks/scripts/create-rds.sh
+chmod +x create-rds.sh
 ./create-rds.sh
 ```
 
@@ -1581,6 +1591,8 @@ export DP_NAMESPACE="dp1-ns"
 
 ```bash
 cd scripts/
+curl -fsSLO https://raw.githubusercontent.com/TIBCOSoftware/tp-helm-charts/main/docs/workshop/eks/scripts/create-efs-data-plane.sh
+chmod +x create-efs-data-plane.sh
 ./create-efs-data-plane.sh
 export TP_EFS_ID="fs-0ec1c745c10d523f6"   # Replace with your DP EFS ID
 ```

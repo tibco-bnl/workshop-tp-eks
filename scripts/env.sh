@@ -136,7 +136,9 @@ export TP_EBS_ENABLED=true                   # Enable EBS gp3 storage class crea
 export TP_STORAGE_CLASS="ebs-gp3"           # EBS gp3 storage class name (for EMS, Elasticsearch)
 
 # EFS file system IDs (set after EFS is created by script or Crossplane)
-# These are output by create-efs-control-plane.sh and create-efs-data-plane.sh
+# The create-efs-control-plane.sh and create-efs-data-plane.sh helper scripts
+# are maintained upstream at:
+# https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/scripts
 # export TP_EFS_ID="fs-0xxxxxxxxxxxxxxxxx"   # EFS ID for CP or DP (replace after creation)
 
 
@@ -419,12 +421,12 @@ echo "Review and update empty values before proceeding:"
 [ -z "$TP_CONTAINER_REGISTRY_USER" ]     && echo "  ⚠ TP_CONTAINER_REGISTRY_USER is not set"
 [ -z "$TP_CONTAINER_REGISTRY_PASSWORD" ] && echo "  ⚠ TP_CONTAINER_REGISTRY_PASSWORD is not set"
 # Simplified DNS cert check
-[ -n "$TP_BASE_DNS_DOMAIN" -a -z "$TP_BASE_DOMAIN_CERT_ARN" ] \
+[ -n "${TP_BASE_DNS_DOMAIN:-}" ] && [ -z "${TP_BASE_DOMAIN_CERT_ARN:-}" ] \
                                            && echo "  ⚠ TP_BASE_DOMAIN_CERT_ARN is not set (required for simplified DNS)"
 # Legacy DNS cert checks (only warn when legacy vars are set)
-[ -n "$TP_MY_DOMAIN" -a -z "$TP_MY_DOMAIN_CERT_ARN" ] \
+[ -n "${TP_MY_DOMAIN:-}" ] && [ -z "${TP_MY_DOMAIN_CERT_ARN:-}" ] \
                                            && echo "  ⚠ TP_MY_DOMAIN_CERT_ARN is not set (required for legacy DNS)"
-[ -n "$TP_TUNNEL_DOMAIN" -a -z "$TP_TUNNEL_DOMAIN_CERT_ARN" ] \
+[ -n "${TP_TUNNEL_DOMAIN:-}" ] && [ -z "${TP_TUNNEL_DOMAIN_CERT_ARN:-}" ] \
                                            && echo "  ⚠ TP_TUNNEL_DOMAIN_CERT_ARN is not set (required for legacy DNS)"
 [ -z "$TP_RDS_MASTER_PASSWORD" -o "$TP_RDS_MASTER_PASSWORD" = "TP_DBAdminPassword" ] \
                                            && echo "  ⚠ TP_RDS_MASTER_PASSWORD is using the default placeholder"
