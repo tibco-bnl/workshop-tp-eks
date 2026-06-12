@@ -24,7 +24,7 @@ releases/
 
 | Area | 1.18.0 Change | EKS Impact |
 |------|---------------|------------|
-| Gateway API | Gateway API Controller support for Control Tower data planes | EKS Traefik users can evaluate Gateway API endpoint exposure |
+| Gateway API | Gateway API Controller support for Control Plane and Control Tower data planes | EKS users can evaluate NGINX Gateway Fabric, Traefik, Istio, NetScaler, and supported capability endpoint exposure |
 | RBAC | Namespace-level RBAC for Application Manager and Application Viewer | Review Data Plane namespaces and role assignments after upgrade |
 | Email | Email server configuration moved to Platform Console | Remove deprecated Helm values; configure SES, SMTP, SendGrid, or Microsoft Graph in UI |
 | Alerts | Alerts Audit Trail page | Add alert audit validation to post-upgrade checks |
@@ -61,7 +61,7 @@ The 1.18 examples no longer emit `global.external.emailServerType`, `global.exte
 
 ### Gateway API
 
-The docs keep the existing ALB plus Nginx or Traefik ingress as the baseline and describe Gateway API as an optional 1.18 evaluation path for supported capabilities.
+The docs keep the existing ALB plus Nginx or Traefik ingress as the baseline and describe Gateway API as an optional 1.18 evaluation path. The shared CP+DP guide now includes an NGINX Gateway Fabric example and a `tibco-cp-base` `gatewayRoute` override for router and hybrid-proxy `HTTPRoute` resources.
 
 ## Updated Files
 

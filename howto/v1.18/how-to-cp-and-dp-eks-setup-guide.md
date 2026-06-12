@@ -60,6 +60,8 @@ global:
     dnsTunnelDomain: "${TP_BASE_DNS_DOMAIN}"
 ```
 
+`dnsDomain` and `dnsTunnelDomain` can use the same value in simplified DNS, but they represent different routing roles. `dnsDomain` is for normal Control Plane router traffic, while `dnsTunnelDomain` tells the platform what public domain to advertise for hybrid connectivity tunnel traffic handled by `hybrid-proxy`. In the baseline Ingress model, tunnel traffic uses the subscription host and `/infra/tunnel` path, so no separate tunnel domain or certificate is needed.
+
 Use one Route 53 wildcard alias record and one ACM wildcard certificate:
 
 ```text
@@ -101,7 +103,97 @@ Crossplane-created Aurora clusters may enforce `rds.force_ssl=1`; do not use `TP
 
 ### Gateway API
 
-TIBCO Platform 1.18.0 adds Gateway API controller support for Control Tower data planes. For EKS workshops, continue using AWS ALB plus Nginx or Traefik ingress for the baseline. Evaluate Traefik Gateway API for capability endpoint exposure only when the capability and target Data Plane are ready for Gateway API resources.
+TIBCO Platform 1.18.0 adds Gateway API controller support for Control Plane and Control Tower data planes. The official requirements list NGINX Gateway Fabric 2.3.0, Istio 1.28.2, Traefik `traefik-39.0.7`, and NetScaler `netscaler-cpx-with-gateway-controller-2.0.0` for Control Plane and data plane Gateway API usage. Data planes can also use the `Other Gateway API Controller` option when the target controller is not listed explicitly.
+
+For EKS workshops, continue using AWS ALB plus Nginx or Traefik ingress for the baseline. Evaluate Gateway API only when the target Control Plane, capability, and Data Plane are ready for Gateway API resources.
+
+#### NGINX Gateway Fabric Example
+
+Install NGINX Gateway Fabric and create a Gateway for route attachment:
+
+```bash
+export TP_GATEWAY_NAMESPACE="nginx-gateway"
+export TP_GATEWAY_NAME="nginx-gateway"
+export TP_GATEWAY_CLASS="nginx"
+export TP_TUNNEL_DOMAIN="${CP_INSTANCE_ID}-tunnel.${TP_HOSTED_ZONE_DOMAIN}"
+
+kubectl apply --server-side -f \
+  https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.1/standard-install.yaml
+
+helm upgrade --install nginx-gateway-fabric \
+  oci://ghcr.io/nginx/charts/nginx-gateway-fabric \
+  --namespace ${TP_GATEWAY_NAMESPACE} \
+  --create-namespace \
+  --version 2.3.0
+
+kubectl apply -f - <<EOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ${TP_GATEWAY_NAME}
+  namespace: ${TP_GATEWAY_NAMESPACE}
+spec:
+  gatewayClassName: ${TP_GATEWAY_CLASS}
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+EOF
+```
+
+#### `tibco-cp-base` Gateway API Values
+
+Use a second values file with the generated `aws-tibco-cp-base-values.yaml` file. This keeps the base CP values unchanged and only swaps router and hybrid-proxy routing from classic `Ingress` to Gateway API `HTTPRoute`.
+
+> **Important:** The current `tibco-cp-base` Gateway API values create root-path `HTTPRoute` rules. For a full CP+DP installation with hybrid connectivity, use a separate tunnel hostname with Gateway API, or keep the shared-domain `/infra/tunnel` route on the baseline Ingress model.
+
+```yaml
+router-operator:
+  ingress:
+    enabled: false
+  gatewayRoute:
+    enabled: true
+    controllerName: nginx
+    parentRefs:
+      - name: nginx-gateway
+        namespace: nginx-gateway
+        sectionName: http
+    hostnames:
+      - "admin.aws.example.com"
+      - "dev.aws.example.com"
+
+hybrid-proxy:
+  enabled: true
+  ingress:
+    enabled: false
+  gatewayRoute:
+    enabled: true
+    controllerName: nginx
+    parentRefs:
+      - name: nginx-gateway
+        namespace: nginx-gateway
+        sectionName: http
+    hostnames:
+      - "cp1-tunnel.aws.example.com"
+
+global:
+  external:
+    dnsTunnelDomain: "cp1-tunnel.aws.example.com"
+```
+
+Install with the Gateway API override:
+
+```bash
+helm upgrade --install --wait --timeout 2h --create-namespace \
+  -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco/tibco-cp-base \
+  --labels layer=1 \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
+  -f aws-tibco-cp-base-values.yaml \
+  -f aws-tibco-cp-base-gateway-api-values.yaml
+```
 
 Check Gateway API readiness when you enable it:
 
@@ -110,6 +202,8 @@ kubectl get gatewayclass
 kubectl get gateway -A
 kubectl get httproute -A
 ```
+
+When registering a Control Tower data plane for Gateway API endpoint exposure, select NGINX Gateway Fabric, use GatewayClass `nginx`, Gateway name `nginx-gateway`, and namespace `nginx-gateway`. Supported BW5, BW6, and Flogo endpoint exposure can then create `HTTPRoute` resources instead of classic `Ingress` resources.
 
 ### Namespace-Level RBAC
 

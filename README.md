@@ -26,7 +26,7 @@ TIBCO Platform 1.18.0 on EKS keeps the 1.17 simplified DNS model and adds these 
 
 - **Simplified DNS continues:** use one Route 53 base domain and one ACM wildcard certificate for admin, subscription, and tunnel traffic.
 - **Console-managed email:** configure SES, SMTP, SendGrid, or Microsoft Graph in Platform Console. Do not put deprecated email provider settings in `tibco-cp-base` Helm values.
-- **Gateway API evaluation path:** Traefik Gateway API can be evaluated for supported BW5, BW6, and Flogo endpoint exposure.
+- **Gateway API evaluation path:** NGINX Gateway Fabric, Traefik, Istio, and NetScaler Gateway API controllers can be evaluated where CP, DP, and capability routes support Gateway API resources.
 - **Namespace-level RBAC:** Application Manager and Application Viewer access can be scoped by Data Plane namespace.
 - **Alert Audit Trail:** alert health and rule-performance events are available in the UI.
 - **Aurora PostgreSQL SSL guidance:** use `require` or `verify-full` when `rds.force_ssl=1` is enforced.
@@ -86,7 +86,7 @@ You also need AWS permissions for EKS, IAM, EC2/VPC, Route 53, ACM, EFS, EBS, an
 | Database | Amazon Aurora PostgreSQL 16 recommended |
 | Storage | Amazon EFS for shared files, Amazon EBS gp3 for block storage |
 | DNS and TLS | Route 53 hosted zone and ACM wildcard certificate |
-| Ingress | AWS ALB with Nginx or Traefik for platform routes |
+| Ingress and Gateway API | AWS ALB with Nginx or Traefik for the baseline; optional Gateway API evaluation with NGINX Gateway Fabric, Traefik, Istio, or NetScaler |
 | AWS identity | IAM Roles for Service Accounts (IRSA) |
 
 ## Repository Map

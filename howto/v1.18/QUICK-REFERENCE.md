@@ -79,7 +79,7 @@ kubectl get gateway -A
 kubectl get httproute -A
 ```
 
-Use Traefik Gateway API only where the capability and Data Plane are configured for Gateway API endpoint exposure.
+Use Gateway API only where the Control Plane, capability, and Data Plane are configured for Gateway API endpoint exposure. NGINX Gateway Fabric uses GatewayClass `nginx` and can be validated with the `HTTPRoute` checks above.
 
 ### Namespace-Level RBAC
 
