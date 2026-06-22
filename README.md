@@ -98,6 +98,7 @@ workshop-tp-eks/
 |   |-- how-to-dp-eks-setup-guide.md
 |   |-- how-to-dp-eks-observability.md
 |   |-- how-to-add-dns-records-eks-aws.md
+|   |-- how-to-sync-images.md
 |   |-- prerequisites-checklist-for-customer.md
 |   `-- v1.18/
 |       |-- how-to-cp-and-dp-eks-setup-guide.md
@@ -135,6 +136,14 @@ export TP_CONTAINER_REGISTRY_PASSWORD="my-jfrog-token"
 ```
 
 The guide also references upstream AWS helper scripts maintained in the official [tp-helm-charts EKS workshop directory](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks).
+
+## Image Synchronization
+
+If your EKS cluster cannot reach the TIBCO JFrog registry directly, mirror images to an internal registry (e.g., Amazon ECR) before installation. See the full guide for safe copy methods, ECR setup, and image integrity verification:
+
+- [How to push TIBCO Platform images to a custom container registry](./howto/how-to-sync-images)
+
+> **Important**: Do not use `docker push` or `podman push` for BusinessWorks plugin images. Use the official `sync-images.sh` script or `docker buildx imagetools` / `skopeo copy --format v2s2` to preserve GZIP layer integrity. See the guide for details.
 
 ## Troubleshooting
 

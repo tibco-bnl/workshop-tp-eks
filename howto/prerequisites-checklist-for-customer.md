@@ -181,6 +181,33 @@ See [eksctl minimum IAM policies](https://eksctl.io/usage/minimum-iam-policies/)
 | `yq` | 4.40.0+ | YAML processing |
 | `envsubst` | Latest | Environment variable substitution |
 
+### Custom / Internal Registry (Air-Gapped or Private Registry Environments)
+
+If your EKS cluster cannot reach the TIBCO JFrog registry directly, you must pre-mirror all images to an accessible private registry (such as Amazon ECR) before installation.
+
+> **⚠️ Important**: Do **not** use standard `docker push`, `podman push`, `docker save`, or `podman save` to transfer BusinessWorks plugin images. These commands silently re-compress image layers and corrupt the GZIP headers required by the `bwce-utilities` extraction container, causing `tar: invalid tar header checksum` failures during BW capability deployment.
+
+Use the **official TIBCO sync script** or one of these registry-to-registry copy methods that preserve original layer compression:
+
+| Tool | Best For |
+|------|----------|
+| `sync-images.sh` (official TIBCO script) | All images at once — recommended starting point |
+| `docker buildx imagetools create` | Docker environments, per-image copy |
+| `skopeo copy --format v2s2` | Scripted copy, Podman environments |
+| `skopeo dir://` | Air-gapped / physical data transfer |
+
+📖 **Full guide**: [How to Push TIBCO Platform Images to a Custom Container Registry](./how-to-sync-images) — covers all copy methods, ECR setup, air-gapped staging, and image integrity verification.
+
+#### Amazon ECR Checklist
+
+If using Amazon ECR as your private registry:
+
+- [ ] ECR repositories created for each required TIBCO image
+- [ ] IAM permissions include `ecr:GetAuthorizationToken`, `ecr:BatchCheckLayerAvailability`, `ecr:PutImage`, and related push permissions
+- [ ] TIBCO images mirrored to ECR using a bit-perfect copy method (see guide above)
+- [ ] Image integrity verified using GZIP header inspection (see sync guide)
+- [ ] Note: ECR auth tokens expire after 12 hours — use IRSA or a token refresh mechanism for production
+
 ---
 
 ## 7. Network Requirements
