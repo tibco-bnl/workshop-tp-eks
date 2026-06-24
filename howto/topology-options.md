@@ -84,7 +84,7 @@ graph TB
 
 **The customer hosts both Control Plane and Data Plane on the same cluster.**
 
-This is the most common workshop and staging setup. It minimizes infrastructure footprint while preserving the CP/DP separation model. Staging and production each run on their own single cluster.
+This topology minimizes infrastructure footprint while preserving the CP/DP separation model. CP and DP share a cluster but remain logically separated — suitable for any environment including production. Staging and production each run on their own independent cluster.
 
 ```mermaid
 graph TB
@@ -123,15 +123,15 @@ graph TB
 
 - Fewest clusters — one cluster per environment (staging, production)
 - CP and DP communicate in-cluster without a Hybrid Proxy tunnel
-- Suitable for workshops, development, and small-to-medium production environments
+- Valid for any environment — development, staging, and production
 - Upgrading the CP and DP together reduces inter-cluster coordination
 
 ### When to Use
 
-- Workshop and development environments
-- Cost-sensitive staging setups where cluster consolidation is preferred
+- Any environment where cluster consolidation is preferred — development, staging, or production
+- Cost-efficient production setups where a dedicated CP cluster is not required
 - Air-gapped or restricted-network environments where cross-cluster HTTPS is not available
-- Small-scale production where simplicity is more important than strict plane separation
+- Organizations that prefer operational simplicity over strict infrastructure plane separation
 
 ---
 
@@ -474,7 +474,7 @@ For proof-of-concept and workshop setups, a **shared cluster** (multiple teams, 
 | **Hybrid Proxy required** | Yes | No (in-cluster) | Yes | Yes |
 | **Connects to** | Cloud workloads | Cloud workloads | Cloud workloads | On-premises TIBCO |
 | **Infrastructure cost** | Lowest (no CP cluster) | Low (one cluster/env) | Higher (CP + DP clusters) | Additional K8s cluster |
-| **Best for** | Managed simplicity | Dev / Staging / Workshop | Enterprise production | On-premises bridge |
+| **Best for** | Managed simplicity | Any env, cost-efficient | Enterprise, multi-DP | On-premises bridge |
 
 ---
 
