@@ -12,6 +12,7 @@ This repository contains workshop guides for deploying TIBCO Platform on Amazon 
 
 | Goal | Primary guide |
 |------|---------------|
+| Plan CP/DP topology, DTAP, and subscription strategy | [Topology options](./howto/topology-options) |
 | Deploy Control Plane and Data Plane on one EKS cluster | [CP + DP setup guide](./howto/how-to-cp-and-dp-eks-setup-guide) |
 | Apply 1.18-specific install or upgrade notes | [v1.18 overlay](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide) |
 | Connect an EKS Data Plane to an existing Control Plane | [Data Plane-only guide](./howto/how-to-dp-eks-setup-guide) |
@@ -94,6 +95,7 @@ You also need AWS permissions for EKS, IAM, EC2/VPC, Route 53, ACM, EFS, EBS, an
 ```text
 workshop-tp-eks/
 |-- howto/
+|   |-- topology-options.md
 |   |-- how-to-cp-and-dp-eks-setup-guide.md
 |   |-- how-to-dp-eks-setup-guide.md
 |   |-- how-to-dp-eks-observability.md
