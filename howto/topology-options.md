@@ -288,6 +288,181 @@ graph TB
 
 ---
 
+## Subscription Strategies
+
+A **subscription** in TIBCO Platform is an isolated context within the Control Plane — each subscription has its own user access, application catalog, and deployed services. A Control Plane can host one or many subscriptions.
+
+### Single Subscription
+
+All users and capabilities share one subscription. Appropriate for small teams or single-project platforms.
+
+```mermaid
+graph TB
+    CP["Control Plane"]
+    Sub["Subscription: my-platform"]
+    CP --> Sub
+    Sub --> Apps["BW · Flogo · EMS Apps"]
+    DP["Data Plane"] <-->|"Hybrid Proxy"| CP
+```
+
+### Multiple Subscriptions — One Control Plane
+
+Multiple isolated subscriptions coexist under a single Control Plane. Each subscription has independent user access, capability catalog, and application lifecycle — teams work in isolation without separate CP infrastructure.
+
+```mermaid
+graph TB
+    CP["Control Plane"]
+    CP --> SubA["Subscription: team-a"]
+    CP --> SubB["Subscription: team-b"]
+    CP --> SubC["Subscription: team-c"]
+    DP["Data Plane"] <-->|"Hybrid Proxy"| CP
+```
+
+Use this when different teams or projects need isolation without the overhead of managing separate Control Planes.
+
+### Multiple Control Planes
+
+Fully independent Control Plane instances for complete isolation between business units, regions, or organizations. Each CP manages its own subscriptions, users, and Data Planes with no shared state.
+
+```mermaid
+graph LR
+    subgraph BUA["Business Unit A"]
+        CP1["Control Plane A"] <--> DP1["Data Plane A"]
+    end
+    subgraph BUB["Business Unit B"]
+        CP2["Control Plane B"] <--> DP2["Data Plane B"]
+    end
+```
+
+| Strategy | Isolation level | Management overhead | Best for |
+|----------|----------------|---------------------|----------|
+| **Single subscription** | Shared namespace | Lowest | Small teams, single project |
+| **Multiple subscriptions** | Subscription boundary | Low | Multiple teams, one platform |
+| **Multiple Control Planes** | Full CP isolation | Highest | BU separation, regulatory isolation, M&A |
+
+---
+
+## Data Plane Organization — DTAP
+
+Data Plane application namespaces map to DTAP (Development, Test, Acceptance, Production) stages. Three isolation options trade off cost against blast-radius containment.
+
+### Option A: DTAP Namespaces on a Single Data Plane
+
+All four DTAP stages run as namespaces within one Data Plane cluster. Lowest infrastructure cost; well-suited for pilots, sandboxes, and workshop environments.
+
+```mermaid
+graph TB
+    CP["Control Plane"]
+    subgraph DP["Data Plane — Shared Cluster"]
+        Dev["Namespace: dev"]
+        Test["Namespace: test"]
+        Acc["Namespace: acceptance"]
+        Prod["Namespace: prod"]
+    end
+    CP <-->|"Hybrid Proxy"| DP
+```
+
+> A cluster-level incident affects all DTAP stages simultaneously. Not recommended for production workloads with availability SLAs.
+
+### Option B: Non-Production + Production Data Planes (Recommended)
+
+Dev, Test, and Acceptance share a Non-Production Data Plane cluster. Production runs on a dedicated Production Data Plane cluster. One Control Plane manages both.
+
+```mermaid
+graph TB
+    CP["Control Plane"]
+    subgraph NonProdDP["Non-Production Data Plane Cluster"]
+        Dev["Namespace: dev"]
+        Test["Namespace: test"]
+        Acc["Namespace: acceptance"]
+        O11yNP["Observability"]
+    end
+    subgraph ProdDP["Production Data Plane Cluster"]
+        Prod["Namespace: prod"]
+        BW["BW Capability"]
+        Flogo["Flogo Capability"]
+        EMS["EMS Capability"]
+        O11yP["Observability"]
+    end
+    CP <-->|"Hybrid Proxy"| NonProdDP
+    CP <-->|"Hybrid Proxy"| ProdDP
+```
+
+This is the recommended baseline for most enterprise deployments — it balances cost reduction with production isolation.
+
+### Option C: Fully Isolated Data Planes per DTAP Stage
+
+Each DTAP stage has its own independent Data Plane cluster. Maximum isolation and independent scaling, upgrade, and incident containment per stage.
+
+```mermaid
+graph TB
+    CP["Control Plane"]
+    DPDev["Data Plane — Dev"]
+    DPTest["Data Plane — Test"]
+    DPAcc["Data Plane — Acceptance"]
+    DPProd["Data Plane — Production"]
+    CP <-->|"Hybrid Proxy"| DPDev
+    CP <-->|"Hybrid Proxy"| DPTest
+    CP <-->|"Hybrid Proxy"| DPAcc
+    CP <-->|"Hybrid Proxy"| DPProd
+```
+
+| Option | Clusters | Cost | Blast-radius isolation | Best for |
+|--------|----------|------|------------------------|----------|
+| **A — DTAP namespaces** | 1 | Lowest | Namespace only | Pilot, sandbox, workshop |
+| **B — Non-Prod + Prod** | 2 | Moderate | Cluster (prod separated) | Most enterprise production |
+| **C — Fully isolated** | 4+ | Highest | Full per-stage | Regulated, high-SLA production |
+
+---
+
+## API Gateway Integration
+
+Application endpoints deployed on a Data Plane are exposed through the cluster ingress controller. An API Gateway can sit in front of the ingress for API lifecycle management, rate limiting, authentication, and analytics.
+
+```mermaid
+graph LR
+    Client["External Client"]
+    GW["API Gateway\nMashery · Kong · AWS APIM · Azure APIM"]
+    Ingress["Ingress Controller\nTraefik · ALB · OpenShift Route"]
+    App["BW · Flogo · EMS App\nData Plane Namespace"]
+    Client --> GW
+    GW --> Ingress
+    Ingress --> App
+```
+
+- **TIBCO Mashery** — built-in API management capability deployable as a Data Plane service
+- **Third-party gateways** — Kong, AWS API Gateway, Azure API Management, and Apigee route external traffic to the Data Plane ingress
+- **TLS termination** — at the ingress controller layer; backends communicate over internal cluster networking
+- **Network policy** — egress rules for API Gateway traffic can be configured via `global.tibco.networkPolicy` in `tibco-cp-base` values
+
+---
+
+## Deployment Flavors
+
+TIBCO Platform runs on any CNCF-conformant Kubernetes distribution. Common tested flavors from major cloud providers to local developer setups:
+
+| Flavor | K8s Infrastructure | Ingress | DNS | Storage | Typical use |
+|--------|--------------------|---------|-----|---------|-------------|
+| **Amazon EKS** | AWS managed K8s | ALB (AWS LBC) | Route 53 | EBS gp3 / EFS | AWS cloud production |
+| **Azure AKS** | Azure managed K8s | Traefik / Nginx | Azure DNS | Azure Disk / Files | Azure cloud production |
+| **Azure ARO** | OpenShift on Azure | OpenShift Routes | Azure DNS | Azure Disk / Files | Enterprise OpenShift on Azure |
+| **Google GKE** | Google managed K8s | GCE Ingress / Nginx | Cloud DNS | Persistent Disk / Filestore | GCP cloud production |
+| **OpenShift (on-prem)** | Self-managed OCP | OpenShift Routes | Internal DNS | OCP storage classes | On-premises enterprise |
+| **Shared cluster** | Any K8s (multi-tenant) | Shared ingress | Shared DNS zone | Shared storage | Pilot, PoC, sandbox |
+| **Local cluster** | kind / k3s / minikube | Local ingress | nip.io or `/etc/hosts` | hostPath / local | Developer laptop, CI |
+
+### Pilot and Sandbox Environments
+
+For proof-of-concept and workshop setups, a **shared cluster** (multiple teams, namespace separation) or **local cluster** (kind/k3s) minimizes cost:
+
+- Use **Topology 2** (co-located CP + DP) on a single shared or local cluster
+- Use **DTAP Option A** — all stages as namespaces on one Data Plane
+- DNS via `nip.io` or manual `/etc/hosts` — no cloud DNS zone required
+- Observability is optional — skip Elasticsearch and Prometheus for minimal resource use
+- Email server: use MailDev (a lightweight in-cluster SMTP receiver) configured from the Platform Console
+
+---
+
 ## Topology Comparison
 
 | | **SaaS CP** | **Self-Hosted Co-Located** | **Self-Hosted Separate** | **Control Tower** |
