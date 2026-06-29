@@ -9,7 +9,7 @@ title: TIBCO Platform on EKS - Customer Prerequisites Checklist
 
 **Target Audience**: Customer IT teams responsible for AWS infrastructure preparation
 
-**Last Updated**: May 2026
+**Last Updated**: June 2026
 
 ---
 
@@ -18,6 +18,14 @@ title: TIBCO Platform on EKS - Customer Prerequisites Checklist
 Before the TIBCO implementation team begins installation, please ensure all prerequisites listed in this document are met. This preparation is critical for a successful and timely deployment.
 
 **Estimated Preparation Time**: 3-5 business days (depending on organizational processes)
+
+> **Quick Reference**: Sections 1–7 cover **AWS infrastructure** prerequisites. Sections 8–10 cover **TIBCO Platform Control Plane** specific prerequisites (Helm chart access, Kubernetes secrets, security configuration).
+
+---
+
+## Infrastructure Prerequisites
+
+The following sections (1–7) describe the AWS and Kubernetes infrastructure that must be provisioned before TIBCO Platform installation begins.
 
 ---
 
@@ -124,7 +132,8 @@ These accounts are pre-created by the `eksctl` ClusterConfig recipe when using `
 |-------------|---------|
 | **DNS Provider** | Amazon Route 53 hosted zone |
 | **Domain** | Top-level domain registered in Route 53 (e.g., `aws.example.com`) |
-| **Control Plane domains** | Wildcard certificates for `*.cp1-my.<domain>` and `*.cp1-tunnel.<domain>` |
+| **Simplified DNS (Recommended)** | One shared base domain: admin, subscription portal, and tunnel all use `*.aws.example.com` |
+| **Control Plane domains (Legacy)** | Wildcard certificates for `*.cp1-my.<domain>` and `*.cp1-tunnel.<domain>` |
 | **Data Plane domain** | Wildcard certificate for `*.dp1.<domain>` |
 | **External DNS** | Automatically manages records via IRSA |
 
@@ -135,7 +144,9 @@ These accounts are pre-created by the `eksctl` ClusterConfig recipe when using `
 | Requirement | Details |
 |-------------|---------|
 | **Certificate Provider** | AWS Certificate Manager (ACM) |
-| **Certificate Type** | Wildcard public certificate (`*.cp1-my.<domain>`, `*.cp1-tunnel.<domain>`, `*.dp1.<domain>`) |
+| **Simplified DNS (Recommended)** | One wildcard certificate: `*.<base-domain>` covers admin, subscription, and tunnel |
+| **Legacy DNS** | Two wildcard certificates: `*.cp1-my.<domain>` and `*.cp1-tunnel.<domain>` |
+| **Data Plane** | Wildcard certificate: `*.dp1.<domain>` |
 | **Validation Method** | DNS validation (recommended) |
 | **Status** | Must be in `ISSUED` status before installation |
 
@@ -256,6 +267,12 @@ See [Firewall Requirements](../docs/firewall-requirements-eks) for the complete 
 
 ---
 
+## TIBCO Platform Control Plane Prerequisites
+
+The following sections (8–10) describe prerequisites specific to TIBCO Platform Control Plane installation. These are independent of the AWS infrastructure and focus on TIBCO-specific configuration, secrets, and security settings that must be prepared before running the TIBCO Helm charts.
+
+---
+
 ## 8. TIBCO Platform Helm Chart Repository
 
 | Requirement | Details |
@@ -277,20 +294,111 @@ See [Firewall Requirements](../docs/firewall-requirements-eks) for the complete 
 
 ---
 
-## 10. Security Requirements
+## 10. Kubernetes Secrets
+
+The TIBCO Control Plane requires several Kubernetes secrets to be pre-created in the Control Plane namespace (`${CP_INSTANCE_ID}-ns`, typically `cp1-ns`) **before** deploying the `tibco-cp-base` Helm chart. These secrets are not created by the chart itself.
+
+> **Important**: Store all generated secret values in a secure vault (e.g., AWS Secrets Manager). These secrets are required for disaster recovery and upgrades. Changing `session-keys` or `cporch-encryption-secret` after initial deployment will break the running Control Plane.
+
+### 10.1 CP Namespace and Service Account
+
+Before creating secrets, the CP namespace and service account must exist:
+
+```bash
+export CP_INSTANCE_ID="cp1"
+
+kubectl apply -f <(envsubst '${CP_INSTANCE_ID}' <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${CP_INSTANCE_ID}-ns
+  labels:
+    platform.tibco.com/controlplane-instance-id: ${CP_INSTANCE_ID}
+EOF
+)
+
+kubectl create serviceaccount ${CP_INSTANCE_ID}-sa -n ${CP_INSTANCE_ID}-ns
+```
+
+> **Note**: If using Crossplane claims to provision infrastructure, the namespace and service account are created automatically by the claim.
+
+### 10.2 session-keys (Required)
+
+The TIBCO Control Plane router pods use these cryptographic keys to sign and verify user session tokens. Without this secret, the router pods crash on startup with a missing secret error. **These keys must remain stable across upgrades** — changing them immediately invalidates all active user sessions.
+
+| Key | Purpose |
+|-----|---------|
+| `TSC_SESSION_KEY` | Signs tokens for the TSC (TIBCO Subscription Console) domain |
+| `DOMAIN_SESSION_KEY` | Signs tokens for custom domain routing |
+
+```bash
+export TSC_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
+export DOMAIN_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
+
+kubectl create secret generic session-keys -n ${CP_INSTANCE_ID}-ns \
+  --from-literal=TSC_SESSION_KEY=${TSC_SESSION_KEY} \
+  --from-literal=DOMAIN_SESSION_KEY=${DOMAIN_SESSION_KEY}
+```
+
+### 10.3 cporch-encryption-secret (Required)
+
+The CP Orchestrator service uses this key to encrypt sensitive data written to the database — including Data Plane connection strings, external service credentials, and API keys. This is application-layer encryption (separate from RDS at-rest encryption). **This key must never change after initial deployment**: if it changes, the orchestrator cannot decrypt previously stored data and the Control Plane will fail to connect to registered Data Planes.
+
+```bash
+export CP_ENCRYPTION_SECRET=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c44)
+
+kubectl create secret generic cporch-encryption-secret -n ${CP_INSTANCE_ID}-ns \
+  --from-literal=CP_ENCRYPTION_SECRET=${CP_ENCRYPTION_SECRET}
+```
+
+### 10.4 rds-ca-cert (Required only for SSL verify-full mode)
+
+If you configure `TP_DB_SSL_MODE=verify-full`, the orchestrator needs the AWS RDS CA bundle to verify the Aurora certificate chain against AWS's own Certificate Authority. This secret is **optional** for development environments — use `disable` or `require` SSL mode instead.
+
+```bash
+# Download the regional CA bundle
+curl -o rds-ca-bundle.pem \
+  "https://truststore.pki.rds.amazonaws.com/${TP_CLUSTER_REGION}/${TP_CLUSTER_REGION}-bundle.pem"
+
+# Verify the download contains at least one certificate
+grep -c "BEGIN CERTIFICATE" rds-ca-bundle.pem
+
+kubectl create secret generic rds-ca-cert \
+  -n ${CP_INSTANCE_ID}-ns \
+  --from-file=rds-ca-bundle.pem=rds-ca-bundle.pem
+```
+
+### 10.5 Container Registry Credentials
+
+The TIBCO JFrog container registry credentials are passed as Helm values (`global.tibco.containerRegistry.username` / `password`) in the `tibco-cp-base` chart — the chart creates the internal image pull secret automatically. You do **not** need to pre-create a Kubernetes pull secret manually.
+
+Confirm your JFrog credentials (`TP_CONTAINER_REGISTRY_USER` and `TP_CONTAINER_REGISTRY_PASSWORD`) are available before the Helm install step.
+
+### Secrets Summary
+
+| Secret Name | Namespace | Required | Notes |
+|-------------|-----------|----------|-------|
+| `session-keys` | `${CP_INSTANCE_ID}-ns` | Always | Create before `helm install tibco-cp-base` |
+| `cporch-encryption-secret` | `${CP_INSTANCE_ID}-ns` | Always | Create before `helm install tibco-cp-base` |
+| `rds-ca-cert` | `${CP_INSTANCE_ID}-ns` | Only for `verify-full` SSL | Contains AWS RDS CA bundle PEM |
+| Container registry | Via Helm values | Always | Chart creates the pull secret automatically |
+
+---
+
+## 11. Security Requirements
 
 | Requirement | Details |
 |-------------|---------|
 | **Network Policies** | VPC CNI with `enableNetworkPolicy: true` |
 | **RBAC** | Standard Kubernetes RBAC |
 | **IRSA** | IAM roles for Kubernetes service accounts via OIDC |
-| **Secret Management** | `session-keys` and `cporch-encryption-secret` must be pre-created |
-| **Container Registry Auth** | JFrog credentials stored as Kubernetes image pull secret |
+| **Secret Management** | `session-keys` and `cporch-encryption-secret` must be pre-created (see Section 10) |
+| **Container Registry Auth** | JFrog credentials passed via Helm values; chart creates the pull secret |
 | **Pod Security** | Standard pod security admission |
 
 ---
 
-## 11. Capacity Planning
+## 12. Capacity Planning
 
 ### Control Plane Resource Requirements
 
@@ -316,9 +424,11 @@ Resource requirements depend on the capabilities deployed (BWCE, Flogo, EMS). As
 
 ---
 
-## 12. Pre-Installation Verification Checklist
+## 13. Pre-Installation Verification Checklist
 
 Before beginning installation, verify each item:
+
+**Infrastructure**
 
 - [ ] EKS cluster created with Kubernetes 1.33+
 - [ ] OIDC provider enabled on the cluster
@@ -328,18 +438,31 @@ Before beginning installation, verify each item:
 - [ ] Amazon RDS Aurora PostgreSQL 16 created (for Control Plane)
 - [ ] Route 53 hosted zone configured for the deployment domain
 - [ ] ACM wildcard certificates in `ISSUED` status
-- [ ] TIBCO JFrog container registry credentials available
+- [ ] Outbound HTTPS (443) allowed from EKS cluster to internet
+- [ ] Firewall allows all required domains (see section 7)
+
+**Tools and Access**
+
+- [ ] TIBCO JFrog container registry credentials available (`TP_CONTAINER_REGISTRY_USER` / `TP_CONTAINER_REGISTRY_PASSWORD`)
 - [ ] `kubectl` configured with cluster admin access
 - [ ] Helm 3.13+ installed
 - [ ] `eksctl` 0.210.0+ installed
 - [ ] AWS CLI configured with appropriate region and credentials
-- [ ] `jq`, `yq`, and `envsubst` installed
-- [ ] Outbound HTTPS (443) allowed from EKS cluster to internet
-- [ ] Firewall allows all required domains (see section 7)
+- [ ] `jq`, `yq`, `openssl`, and `envsubst` installed
+
+**TIBCO Platform Control Plane**
+
+- [ ] TIBCO Helm chart repository added (`helm repo add tibco-platform https://tibcosoftware.github.io/tp-helm-charts`)
+- [ ] CP namespace (`${CP_INSTANCE_ID}-ns`) created with the correct label
+- [ ] CP service account (`${CP_INSTANCE_ID}-sa`) created in CP namespace
+- [ ] `session-keys` Kubernetes secret created in CP namespace
+- [ ] `cporch-encryption-secret` Kubernetes secret created in CP namespace
+- [ ] `rds-ca-cert` secret created (only if using `verify-full` SSL mode)
+- [ ] `session-keys` and `cporch-encryption-secret` values saved to a secure vault (AWS Secrets Manager or equivalent)
 
 ---
 
-## 13. Additional Resources
+## 14. Additional Resources
 
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html)
 - [eksctl Documentation](https://eksctl.io/)
