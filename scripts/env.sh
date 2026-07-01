@@ -112,6 +112,14 @@ export TP_MAIN_INGRESS_CONTROLLER="alb"      # AWS ALB ingress class (always "al
 export TP_INGRESS_CONTROLLER="nginx"         # Kubernetes ingress class for CP (nginx or traefik)
 export TP_INGRESS_CLASS="nginx"              # Kubernetes ingress class for DP (nginx or traefik)
 
+# Gateway API (optional — set TP_GATEWAY_API_ENABLED="true" to use HTTPRoute instead of Ingress)
+# Requires NGINX Gateway Fabric or another Gateway API controller installed in the cluster.
+# Reference: https://gateway-api.sigs.k8s.io/
+export TP_GATEWAY_API_ENABLED="false"         # Set "true" to activate Gateway API routing
+export TP_GATEWAY_NAME="tp-ngf-gateway"       # Gateway resource name (created during NGF setup)
+export TP_GATEWAY_NAMESPACE="ingress-system"  # Namespace where the Gateway resource lives
+export TP_GATEWAY_CLASS="nginx"               # GatewayClass name; NGINX Gateway Fabric uses "nginx"
+
 
 # =============================================================================
 # SECTION 7: STORAGE CONFIGURATION

@@ -905,50 +905,46 @@ The `tibco-cp-base` chart supports Gateway API by creating `HTTPRoute` resources
 
 Use a separate override file so you can keep the normal `aws-tibco-cp-base-values.yaml` intact and layer the Gateway API routing choice during installation.
 
-> **Important:** The current `tibco-cp-base` Gateway API values create root-path `HTTPRoute` rules. For a full CP+DP installation with hybrid connectivity, use a separate tunnel hostname with Gateway API, or keep the baseline Ingress model for the simplified shared-domain `/infra/tunnel` route.
+Set the gateway env vars (already in `env.sh`):
 
 ```bash
-cat > aws-tibco-cp-base-gateway-api-values.yaml <(envsubst \
-  '${TP_GATEWAY_NAME}, ${TP_GATEWAY_NAMESPACE}, ${CP_ADMIN_HOST_PREFIX}, ${CP_SUBSCRIPTION},
-    ${TP_BASE_DNS_DOMAIN}, ${TP_TUNNEL_DOMAIN}' \
-  << 'EOF'
-router-operator:
-  ingress:
-    enabled: false
-  gatewayRoute:
-    enabled: true
-    controllerName: nginx
-    parentRefs:
-      - name: ${TP_GATEWAY_NAME}
-        namespace: ${TP_GATEWAY_NAMESPACE}
-        sectionName: http
-    hostnames:
-      - "${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}"
-      - "${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}"
-    annotations:
-      external-dns.alpha.kubernetes.io/hostname: "${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN},${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}"
+echo "TP_GATEWAY_NAME=${TP_GATEWAY_NAME}"           # e.g. tp-ngf-gateway
+echo "TP_GATEWAY_NAMESPACE=${TP_GATEWAY_NAMESPACE}" # e.g. ingress-system
+echo "TP_GATEWAY_CLASS=${TP_GATEWAY_CLASS}"         # e.g. nginx
+```
 
+Create the Gateway API override file:
+
+```bash
+cat > aws-tibco-cp-base-gateway-api-values.yaml <<EOF
 hybrid-proxy:
   enabled: true
-  ingress:
-    enabled: false
   gatewayRoute:
     enabled: true
-    controllerName: nginx
-    parentRefs:
-      - name: ${TP_GATEWAY_NAME}
-        namespace: ${TP_GATEWAY_NAMESPACE}
-        sectionName: http
+    controllerName: ${TP_GATEWAY_CLASS}
     hostnames:
-      - "${TP_TUNNEL_DOMAIN}"
+    - '${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}'  # Dedicated tunnel back-channel
+    parentRefs:
+    - name: ${TP_GATEWAY_NAME}
+      namespace: ${TP_GATEWAY_NAMESPACE}
     annotations:
-      external-dns.alpha.kubernetes.io/hostname: "${TP_TUNNEL_DOMAIN}"
+      external-dns.alpha.kubernetes.io/hostname: '*.${TP_BASE_DNS_DOMAIN}'
 
-global:
-  external:
-    dnsTunnelDomain: "${TP_TUNNEL_DOMAIN}"
+otel-collector:
+  enabled: true
+
+router-operator:
+  gatewayRoute:
+    enabled: true
+    controllerName: ${TP_GATEWAY_CLASS}
+    hostnames:
+    - '*.${TP_BASE_DNS_DOMAIN}'  # Wildcard captures all current and future subscriptions
+    parentRefs:
+    - name: ${TP_GATEWAY_NAME}
+      namespace: ${TP_GATEWAY_NAMESPACE}
+    annotations:
+      external-dns.alpha.kubernetes.io/hostname: '*.${TP_BASE_DNS_DOMAIN}'
 EOF
-)
 ```
 
 Install `tibco-cp-base` with both files:
@@ -968,6 +964,9 @@ Validate the generated routes:
 kubectl get httproute -n ${CP_INSTANCE_ID}-ns
 kubectl describe httproute -n ${CP_INSTANCE_ID}-ns
 ```
+
+> [!TIP]
+> The `*.${TP_BASE_DNS_DOMAIN}` wildcard hostname on `router-operator` captures admin, subscription, and any future portal hostnames without requiring individual entries. The `hybrid-proxy` uses an explicit `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` hostname so the tunnel back-channel stays isolated from the wildcard.
 
 When registering or configuring a Control Tower data plane with Gateway API, select NGINX Gateway Fabric, use GatewayClass `nginx`, and provide Gateway name `${TP_GATEWAY_NAME}` and namespace `${TP_GATEWAY_NAMESPACE}`. Capabilities that support Gateway API, such as supported BW5, BW6, and Flogo endpoint exposure, create `HTTPRoute` resources instead of classic `Ingress` resources.
 

@@ -19,7 +19,7 @@ Before the TIBCO implementation team begins installation, please ensure all prer
 
 **Estimated Preparation Time**: 3-5 business days (depending on organizational processes)
 
-> **Quick Reference**: Sections 1–7 cover **AWS infrastructure** prerequisites. Sections 8–10 cover **TIBCO Platform Control Plane** specific prerequisites (Helm chart access, Kubernetes secrets, security configuration).
+> **Quick Reference**: Sections 1–7 cover **AWS infrastructure** prerequisites. Sections 8–11 cover **TIBCO Platform Control Plane** specific prerequisites (Helm charts, Kubernetes secrets, optional items). Sections 12–13 cover security and capacity planning.
 
 ---
 
@@ -385,7 +385,87 @@ Confirm your JFrog credentials (`TP_CONTAINER_REGISTRY_USER` and `TP_CONTAINER_R
 
 ---
 
-## 11. Security Requirements
+## 11. Optional Prerequisites
+
+The following are not required for all deployments but apply in specific customer environments. Review each subsection and prepare the relevant items before installation.
+
+### 11.1 Custom / Private Helm Chart Repository
+
+**When this applies:** If the EKS cluster cannot reach `https://tibcosoftware.github.io/tp-helm-charts` or other public chart repositories (air-gapped, restricted-egress, or policy-enforced environments), mirror the required Helm charts to an internal repository such as JFrog Artifactory, Sonatype Nexus, or AWS CodeArtifact before installation.
+
+**Charts to mirror:**
+
+| Chart | Default Source Repo | Purpose |
+|-------|--------------------|---------| 
+| `tibco-cp-base` | `https://tibcosoftware.github.io/tp-helm-charts` | Control Plane deployment |
+| `dp-config-aws` | `https://tibcosoftware.github.io/tp-helm-charts` | Data Plane infrastructure and ingress |
+| `dp-core-infrastructure` | `https://tibcosoftware.github.io/tp-helm-charts` | Data Plane core components |
+| `dp-configure-namespace` | `https://tibcosoftware.github.io/tp-helm-charts` | Data Plane namespace configuration |
+| `dp-config-es` | `https://tibcosoftware.github.io/tp-helm-charts` | Elasticsearch / Kibana / APM |
+| `cert-manager` | `https://charts.jetstack.io` | Certificate management |
+| `external-dns` | `https://kubernetes-sigs.github.io/external-dns` | Route 53 DNS automation |
+| `aws-load-balancer-controller` | `https://aws.github.io/eks-charts` | ALB provisioning |
+| `metrics-server` | `https://kubernetes-sigs.github.io/metrics-server` | HPA metrics |
+| `kube-prometheus-stack` | `https://prometheus-community.github.io/helm-charts` | Prometheus and Grafana |
+| `eck-operator` | `https://helm.elastic.co` | ECK operator for Elasticsearch |
+
+**Information to gather before installation:**
+
+- [ ] Internal Helm repository URL: `_______________________`
+- [ ] Authentication credentials for the chart repo (username / token)
+- [ ] All required charts and versions confirmed mirrored (match versions in setup guide exactly)
+- [ ] Helm CLI configured: `helm repo add <name> <internal-url> --username <user> --password <token>`
+
+> **Version pinning:** Mirror the exact chart versions listed in the setup guide — do not rely on `latest` tags, as charts pulled from a mirrored repo bypass the upstream version resolution.
+
+### 11.2 Non-Well-Known CA Certificates for Data Plane Ingress Registration
+
+**When this applies:** If the Data Plane ingress TLS certificate is signed by an **internal or private Certificate Authority** (not a public CA such as Let's Encrypt, DigiCert, or Comodo), the TIBCO Control Plane cannot trust the Data Plane's HTTPS endpoint without being explicitly told about the CA.
+
+**Background:** During Data Plane registration in the Control Plane UI, the provisioner agent installed on the Data Plane cluster must be able to make a verified HTTPS connection back to the Control Plane, and the Control Plane must trust the Data Plane's ingress endpoint to perform health checks and capability provisioning. If the Data Plane ingress certificate chain cannot be verified against a public root CA store, the registration will fail or capabilities will not deploy correctly.
+
+**Registration field:** During Data Plane registration (**Control Plane UI → Settings → Infrastructure → Data Planes → Register Data Plane**), the wizard includes a **TLS Certificate / CA Bundle** field. This field is required when the Data Plane ingress uses a non-public CA certificate.
+
+**What to prepare:**
+
+| Certificate Type | CA Cert Required? | What to Provide |
+|------------------|-------------------|-----------------|
+| Public CA (Let's Encrypt, DigiCert, etc.) | No | Nothing extra needed |
+| Internal PKI / Corporate CA | **Yes** | PEM-encoded CA certificate from your internal PKI chain |
+| Self-signed certificate | **Yes** | The self-signed certificate itself (it is its own CA) |
+| AWS ACM (for ALB-terminated TLS) | No | ACM certs are publicly trusted |
+
+- [ ] Identify whether your Data Plane ingress TLS certificate uses a public or private CA
+- [ ] If private CA: obtain the **PEM-encoded CA certificate** (starts with `-----BEGIN CERTIFICATE-----`)
+  - For internal PKI: get the intermediate or root CA cert from your PKI team
+  - For self-signed: use the self-signed certificate file itself
+- [ ] Confirm the cert is accessible on the installation machine at registration time
+
+> **Reference:** [Registering a Data Plane — TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#UserGuide/registering-a-data-plane.htm)
+
+**Impact if omitted when using private CA:**
+- The provisioner agent cannot establish a verified connection to the Control Plane
+- Capability provisioning (BWCE, Flogo, EMS) will fail with TLS errors
+- Data Plane shows as disconnected in the Control Plane UI
+
+### 11.3 PostgreSQL SSL Certificate
+
+If using `TP_DB_SSL_MODE=require` or `verify-full` to encrypt the Control Plane's connection to Aurora PostgreSQL, a CA certificate secret is required. See **Section 10.4 (rds-ca-cert)** for commands and the AWS RDS CA bundle download URL. Prepare the CA bundle file before the `helm install tibco-cp-base` step.
+
+For `verify-full`, also provide the CA bundle to your DBA to confirm which regional bundle (`<region>-bundle.pem`) covers your Aurora cluster's certificate.
+
+### 11.4 Custom Container Registry
+
+If the cluster uses a private container registry instead of the TIBCO JFrog registry (see Section 6 for the full mirroring guide), additionally confirm:
+
+- [ ] The registry URL, repository path, and authentication credentials are available as environment variables (`TP_CONTAINER_REGISTRY_URL`, `TP_CONTAINER_REGISTRY_USER`, `TP_CONTAINER_REGISTRY_PASSWORD`)
+- [ ] The `TP_CONTAINER_REGISTRY_REPOSITORY` variable is set to the correct repository path within the private registry
+- [ ] Images have been mirrored using a bit-perfect method (see Section 6 — do not use plain `docker push`)
+- [ ] IRSA or node IAM role grants `ecr:GetAuthorizationToken` and pull permissions if using Amazon ECR
+
+---
+
+## 12. Security Requirements
 
 | Requirement | Details |
 |-------------|---------|
@@ -398,7 +478,7 @@ Confirm your JFrog credentials (`TP_CONTAINER_REGISTRY_USER` and `TP_CONTAINER_R
 
 ---
 
-## 12. Capacity Planning
+## 13. Capacity Planning
 
 ### Control Plane Resource Requirements
 
@@ -424,7 +504,7 @@ Resource requirements depend on the capabilities deployed (BWCE, Flogo, EMS). As
 
 ---
 
-## 13. Pre-Installation Verification Checklist
+## 14. Pre-Installation Verification Checklist
 
 Before beginning installation, verify each item:
 
@@ -450,6 +530,13 @@ Before beginning installation, verify each item:
 - [ ] AWS CLI configured with appropriate region and credentials
 - [ ] `jq`, `yq`, `openssl`, and `envsubst` installed
 
+**Optional Items (complete if applicable)**
+
+- [ ] Internal Helm repo configured if cluster cannot reach `https://tibcosoftware.github.io/tp-helm-charts` (see Section 11.1)
+- [ ] Private CA certificate for Data Plane ingress obtained and ready for DP registration (see Section 11.2)
+- [ ] PostgreSQL SSL CA bundle downloaded (`<region>-bundle.pem`) if using `verify-full` SSL mode (see Section 11.3)
+- [ ] Custom container registry confirmed with bit-perfect image copy and correct `TP_CONTAINER_REGISTRY_*` variables set (see Section 11.4)
+
 **TIBCO Platform Control Plane**
 
 - [ ] TIBCO Helm chart repository added (`helm repo add tibco-platform https://tibcosoftware.github.io/tp-helm-charts`)
@@ -462,7 +549,7 @@ Before beginning installation, verify each item:
 
 ---
 
-## 14. Additional Resources
+## 15. Additional Resources
 
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html)
 - [eksctl Documentation](https://eksctl.io/)
