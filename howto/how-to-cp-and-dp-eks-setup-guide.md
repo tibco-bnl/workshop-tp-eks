@@ -828,12 +828,19 @@ export TP_TUNNEL_DOMAIN_CERT_ARN="arn:aws:acm:us-west-2:123456789012:certificate
 
 > **Source:** [tp-helm-charts/docs/workshop/eks/control-plane/README.md — Install Additional Ingress Controller](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks/control-plane#install-additional-ingress-controller-optional)
 
-**Why a two-tier ingress (ALB + Nginx/Traefik):**
-The AWS ALB handles TLS termination, SSL policies, and cross-AZ load balancing at the AWS layer. Nginx or Traefik then handles path-based routing, header manipulation, and proxy configuration within the cluster. This two-tier pattern is the AWS-recommended approach because:
-1. ALB provides native AWS features (WAF integration, ACM certs, access logging to S3)
-2. Nginx/Traefik provides rich Kubernetes-native routing without duplicating those features at the ALB level
+> [!WARNING]
+> **ingress-nginx is entering retirement.** The upstream [ingress-nginx project](https://kubernetes.github.io/ingress-nginx/) is moving to maintenance mode and is no longer recommended for new deployments by the Kubernetes community. The recommended paths are:
+> - **Gateway API** (Kubernetes-native successor to the Ingress API) — see the Gateway API section below
+> - **Traefik** (if you prefer to stay on the classic Ingress API)
+>
+> The ingress-nginx installation steps are kept in this guide for reference and for environments that already have nginx deployed.
 
-The `dp-config-aws` chart creates both: an ALB-backed `Ingress` object (which the ALB controller turns into an AWS ALB) and the Nginx/Traefik deployment.
+**Why a two-tier ingress (ALB + Traefik/Nginx):**
+The AWS ALB handles TLS termination, SSL policies, and cross-AZ load balancing at the AWS layer. Traefik or Nginx then handles path-based routing, header manipulation, and proxy configuration within the cluster. This two-tier pattern is the AWS-recommended approach because:
+1. ALB provides native AWS features (WAF integration, ACM certs, access logging to S3)
+2. Traefik/Nginx provides rich Kubernetes-native routing without duplicating those features at the ALB level
+
+The `dp-config-aws` chart creates both: an ALB-backed `Ingress` object (which the ALB controller turns into an AWS ALB) and the Traefik/Nginx deployment.
 
 Reference: [dp-config-aws chart](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/charts/dp-config-aws)
 
@@ -932,9 +939,36 @@ When registering a Control Tower data plane with Gateway API, select NGINX Gatew
 
 ### 🔷 Simplified DNS Ingress (Recommended)
 
-Install Nginx using the base domain. Both the CP UI and the tunnel share the same ALB and the same wildcard certificate.
+Install an ingress controller using the base domain. Both the CP UI and the tunnel share the same ALB and the same wildcard certificate. Traefik is recommended; nginx steps are kept for reference.
 
-**Option A: Nginx (Recommended)**
+**Option A: Traefik (Recommended — Simplified DNS)**
+
+```bash
+helm upgrade --install --wait --timeout 1h --create-namespace \
+  -n ingress-system dp-config-aws-traefik dp-config-aws \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --labels layer=1 --version "^1.0.0" -f - <<EOF
+dns:
+  domain: "${TP_BASE_DNS_DOMAIN}"
+httpIngress:
+  enabled: true
+  name: traefik
+  backend:
+    serviceName: dp-config-aws-traefik
+  annotations:
+    alb.ingress.kubernetes.io/group.name: "${TP_BASE_DNS_DOMAIN}"
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+    alb.ingress.kubernetes.io/certificate-arn: "${TP_BASE_DOMAIN_CERT_ARN}"
+    external-dns.alpha.kubernetes.io/hostname: "*.${TP_BASE_DNS_DOMAIN}"
+    kubernetes.io/ingress.class: alb
+traefik:
+  enabled: true
+  additionalArguments:
+    - '--entryPoints.web.forwardedHeaders.insecure'
+    - '--serversTransport.insecureSkipVerify=true'
+EOF
+```
+
+**Option B: Nginx (Kept for reference — entering retirement)**
 
 ```bash
 helm upgrade --install --wait --timeout 1h --create-namespace \
@@ -965,24 +999,30 @@ EOF
 
 > **Note:** The `external-dns.alpha.kubernetes.io/hostname: "*.${TP_BASE_DNS_DOMAIN}"` annotation lets External DNS create a single wildcard Route 53 record, which covers `admin.xxx`, `dev.xxx`, and `tunnel.xxx` without individual per-host records. If your Route 53 zone doesn't support wildcard aliases, create specific A-records for each host manually.
 
-**Option B: Traefik (Simplified DNS)**
+---
+
+### 🔶 Legacy DNS Ingress (Backward Compatible)
+
+Install separate ingresses for the `my` and `tunnel` domains, each with its own ACM certificate. Traefik is recommended; nginx steps are kept for reference.
+
+**Option A: Traefik (Recommended — Legacy DNS)**
 
 ```bash
 helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ingress-system dp-config-aws-traefik dp-config-aws \
   --repo "${TP_TIBCO_HELM_CHART_REPO}" --labels layer=1 --version "^1.0.0" -f - <<EOF
 dns:
-  domain: "${TP_BASE_DNS_DOMAIN}"
+  domain: "${TP_MY_DOMAIN}"
 httpIngress:
   enabled: true
   name: traefik
   backend:
     serviceName: dp-config-aws-traefik
   annotations:
-    alb.ingress.kubernetes.io/group.name: "${TP_BASE_DNS_DOMAIN}"
+    alb.ingress.kubernetes.io/group.name: "${TP_MY_DOMAIN}"
     alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
-    alb.ingress.kubernetes.io/certificate-arn: "${TP_BASE_DOMAIN_CERT_ARN}"
-    external-dns.alpha.kubernetes.io/hostname: "*.${TP_BASE_DNS_DOMAIN}"
+    alb.ingress.kubernetes.io/certificate-arn: "${TP_MY_DOMAIN_CERT_ARN}"
+    external-dns.alpha.kubernetes.io/hostname: "*.${TP_MY_DOMAIN}"
     kubernetes.io/ingress.class: alb
 traefik:
   enabled: true
@@ -992,13 +1032,7 @@ traefik:
 EOF
 ```
 
----
-
-### 🔶 Legacy DNS Ingress (Backward Compatible)
-
-Install separate Nginx ingresses for the `my` and `tunnel` domains, each with its own ACM certificate.
-
-**Option A: Nginx (Legacy DNS)**
+**Option B: Nginx (Kept for reference — entering retirement)**
 
 Install Nginx for Control Plane application traffic (`TP_MY_DOMAIN`):
 
@@ -1052,33 +1086,7 @@ ingress-nginx:
 EOF
 ```
 
-**Option B: Traefik (Legacy DNS)**
-
-```bash
-helm upgrade --install --wait --timeout 1h --create-namespace \
-  -n ingress-system dp-config-aws-traefik dp-config-aws \
-  --repo "${TP_TIBCO_HELM_CHART_REPO}" --labels layer=1 --version "^1.0.0" -f - <<EOF
-dns:
-  domain: "${TP_MY_DOMAIN}"
-httpIngress:
-  enabled: true
-  name: traefik
-  backend:
-    serviceName: dp-config-aws-traefik
-  annotations:
-    alb.ingress.kubernetes.io/group.name: "${TP_MY_DOMAIN}"
-    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
-    external-dns.alpha.kubernetes.io/hostname: "*.${TP_MY_DOMAIN}"
-    kubernetes.io/ingress.class: alb
-traefik:
-  enabled: true
-  additionalArguments:
-    - '--entryPoints.web.forwardedHeaders.insecure'
-    - '--serversTransport.insecureSkipVerify=true'
-EOF
-```
-
-Tunnel for Traefik (Legacy DNS):
+Traefik tunnel traffic (`TP_TUNNEL_DOMAIN`, run after Option A):
 
 ```bash
 helm upgrade --install --wait --timeout 1h --create-namespace \
