@@ -20,7 +20,7 @@ Use this guide as the 1.18.0 overlay for the common EKS CP+DP setup. The base EK
 Use the 1.18.0 base chart:
 
 ```bash
-helm upgrade --install --wait --timeout 2h --create-namespace \
+helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco/tibco-cp-base \
   --labels layer=1 \
   --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
@@ -187,7 +187,7 @@ global:
 Install with the Gateway API override:
 
 ```bash
-helm upgrade --install --wait --timeout 2h --create-namespace \
+helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco/tibco-cp-base \
   --labels layer=1 \
   --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
