@@ -190,12 +190,13 @@ tar -cvf tibco-bw-plugins.tar -C /tmp/staging tci-bw-plugin-cics
 ```bash
 tar -xvf tibco-bw-plugins.tar -C /tmp/staging
 
-# --force ensures any previously corrupted blobs are overwritten
+# --force overwrites cached blobs; --preserve-digests forces the registry to write
+# original upstream blobs exactly (prevents re-compression of BW plugin layers)
 ECR_TOKEN=$(aws ecr get-login-password --region us-east-1)
 skopeo login 123456789012.dkr.ecr.us-east-1.amazonaws.com \
   --username AWS --password "$ECR_TOKEN"
 
-skopeo copy --force --format v2s2 \
+skopeo copy --force --preserve-digests --format v2s2 \
   dir:/tmp/staging/tci-bw-plugin-cics \
   docker://123456789012.dkr.ecr.us-east-1.amazonaws.com/tibco-platform/tci-bw-plugin-cics:2.5.0.v4.3-tci-2.0
 ```
@@ -330,6 +331,155 @@ Run the verification commands above and confirm `ecf2` is present in bytes 10–
 ### Step 4 — Retry the Helm Install
 
 The extraction jobs will now find intact images and complete successfully.
+
+---
+
+## Production Air-Gap Scripts (Validated Download + Upload)
+
+For proxy-segmented environments where the JFrog source and the ECR target have no shared network path, use the following two-script workflow. Both scripts include integrity validation using `skopeo inspect` layer size comparison, validated in production air-gapped deployments.
+
+**Why `--preserve-digests` matters:** Without this flag, the target registry may reassign layer checksums internally during upload, allowing re-compression that corrupts BW plugin GZIP headers (the `BTYPE=00` failure mode). The `--preserve-digests` flag forces the registry API to write the original upstream blobs exactly as-is.
+
+### Script 1 — Download and Validate (Proxy ON)
+
+Run on the internet-connected jump server. Downloads each image as a `dir://` staging directory, validates local byte sizes against the JFrog baseline, then archives for transport.
+
+```bash
+#!/bin/bash
+LOG_FILE="DownloadAndVerify_$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+SRC_CREDS="<jfrog-username>:<jfrog-api-token>"
+SOURCE_REGISTRY="csgprduswrepoedge.jfrog.io/tibco-platform-docker-prod"
+LOCAL_ARCHIVE_DIR="/transfer/tibco-images"
+
+IMAGES=(
+  "tci-bw-plugin-ap:5.0.0.v11.2-tci-2.0"
+  "tci-bw-plugin-kafka:5.0.1.v13.1-tci-2.0"
+  "tci-bw-plugin-pdf:1.0.0.v12.3-tci-2.0"
+  "tci-bw-plugin-salesforce:2.6.0.v26-tci-2.0"
+  "tci-bw-plugin-sharepoint:1.1.0.v19-tci-2.0"
+  "tci-bw-plugin-sp:1.1.1.v3-tci-2.0"
+  "tci-bw-plugin-cassandra:6.3.3.v12-tci-2.0"
+  "infra-container-image-extractor:170-distroless"
+  "common-distroless-base-debian-debug:13.3"
+)
+
+mkdir -p "${LOCAL_ARCHIVE_DIR}" /tmp/skopeo_scratch
+
+for IMAGE in "${IMAGES[@]}"; do
+    NAME=$(echo "$IMAGE" | cut -d':' -f1)
+    TAG=$(echo "$IMAGE" | cut -d':' -f2)
+    SAFE_NAME="${NAME}-${TAG}"
+
+    echo "=== Processing: ${IMAGE} ==="
+
+    JFROG_SIZE=$(skopeo inspect --creds "${SRC_CREDS}" \
+      docker://${SOURCE_REGISTRY}/${IMAGE} | jq '[.LayersData[].Size] | add')
+
+    rm -rf "/tmp/skopeo_scratch/${SAFE_NAME}"
+    mkdir -p "/tmp/skopeo_scratch/${SAFE_NAME}"
+
+    if skopeo copy --src-creds "${SRC_CREDS}" \
+      docker://${SOURCE_REGISTRY}/${IMAGE} \
+      dir:///tmp/skopeo_scratch/${SAFE_NAME}; then
+
+        LOCAL_SIZE=$(find /tmp/skopeo_scratch/${SAFE_NAME} -type f \
+          -not -name "manifest.json" -not -name "version" \
+          -exec stat -c%s {} + | awk '{s+=$1} END {print s}')
+
+        if [ "${JFROG_SIZE}" -eq "${LOCAL_SIZE}" ]; then
+            echo "INTEGRITY CHECK PASSED: ${SAFE_NAME} — JFrog (${JFROG_SIZE}) == Local (${LOCAL_SIZE})"
+            tar -cf "${LOCAL_ARCHIVE_DIR}/${SAFE_NAME}.tar" \
+              -C /tmp/skopeo_scratch "${SAFE_NAME}"
+        else
+            echo "ERROR: Size mismatch — JFrog: ${JFROG_SIZE}, Local: ${LOCAL_SIZE}. Skipping archive."
+        fi
+    fi
+    rm -rf "/tmp/skopeo_scratch/${SAFE_NAME}"
+done
+
+rm -rf /tmp/skopeo_scratch
+echo "=== Done. Transfer ${LOCAL_ARCHIVE_DIR} to the target jump server. ==="
+```
+
+Transfer the archive directory across the air-gap to the target-side jump server.
+
+### Script 2 — Upload and Post-Verify (Proxy OFF, ECR Target)
+
+Run on the target-side jump server inside the secure network. Extracts archives, pushes with `--preserve-digests`, and post-verifies that ECR layer sizes match the local baseline.
+
+```bash
+#!/bin/bash
+LOG_FILE="UploadAndVerify_$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+TARGET_REGISTRY="<account-id>.dkr.ecr.<region>.amazonaws.com"
+REPO="tibco-platform"
+ARCHIVE_DIR="/transfer/tibco-images"
+TMP_DIR="/tmp/skopeo-upload"
+AWS_REGION="<region>"
+
+IMAGES=(
+  "tci-bw-plugin-ap:5.0.0.v11.2-tci-2.0"
+  "tci-bw-plugin-kafka:5.0.1.v13.1-tci-2.0"
+  "tci-bw-plugin-pdf:1.0.0.v12.3-tci-2.0"
+  "tci-bw-plugin-salesforce:2.6.0.v26-tci-2.0"
+  "tci-bw-plugin-sharepoint:1.1.0.v19-tci-2.0"
+  "tci-bw-plugin-sp:1.1.1.v3-tci-2.0"
+  "tci-bw-plugin-cassandra:6.3.3.v12-tci-2.0"
+  "infra-container-image-extractor:170-distroless"
+  "common-distroless-base-debian-debug:13.3"
+)
+
+ECR_TOKEN=$(aws ecr get-login-password --region "${AWS_REGION}")
+skopeo login "${TARGET_REGISTRY}" --username AWS --password "${ECR_TOKEN}"
+
+mkdir -p "${TMP_DIR}"
+
+for IMAGE in "${IMAGES[@]}"; do
+    NAME=$(echo "$IMAGE" | cut -d':' -f1)
+    TAG=$(echo "$IMAGE" | cut -d':' -f2)
+    SAFE_NAME="${NAME}-${TAG}"
+    TAR_FILE="${ARCHIVE_DIR}/${SAFE_NAME}.tar"
+    WORK_DIR="${TMP_DIR}/${SAFE_NAME}"
+
+    echo "=== Uploading: ${IMAGE} ==="
+
+    [ ! -f "${TAR_FILE}" ] && echo "ERROR: Archive not found: ${TAR_FILE}" && continue
+
+    rm -rf "${WORK_DIR}" && mkdir -p "${WORK_DIR}"
+    tar -xf "${TAR_FILE}" -C "${WORK_DIR}"
+
+    IMAGE_DIR=$(find "${WORK_DIR}" -maxdepth 2 -type f \
+      \( -name "oci-layout" -o -name "manifest.json" \) | head -1 | xargs -r dirname)
+    [ -z "${IMAGE_DIR}" ] && echo "ERROR: Cannot locate image dir in ${WORK_DIR}" && continue
+
+    LOCAL_SUM=$(find "${IMAGE_DIR}" -type f \
+      -not -name "manifest.json" -not -name "version" \
+      -exec stat -c%s {} + | awk '{s+=$1} END {print s}')
+
+    if skopeo copy --preserve-digests --format v2s2 \
+      dir://"${IMAGE_DIR}" \
+      docker://${TARGET_REGISTRY}/${REPO}/${NAME}:${TAG}; then
+
+        sleep 2
+        REMOTE_SUM=$(skopeo inspect \
+          docker://${TARGET_REGISTRY}/${REPO}/${NAME}:${TAG} \
+          | jq '[.LayersData[].Size] | add')
+
+        if [ "${LOCAL_SUM}" -eq "${REMOTE_SUM}" ]; then
+            echo "VERIFICATION PASSED: ${NAME}:${TAG} — Registry (${REMOTE_SUM}) matches local."
+        else
+            echo "WARNING: Size mismatch — expected ${LOCAL_SUM}, registry reports ${REMOTE_SUM}"
+        fi
+    fi
+    rm -rf "${WORK_DIR}"
+done
+
+rm -rf "${TMP_DIR}"
+echo "=== Upload and post-verification complete. ==="
+```
 
 ---
 
