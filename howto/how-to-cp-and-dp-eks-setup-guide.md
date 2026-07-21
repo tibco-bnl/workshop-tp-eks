@@ -41,6 +41,13 @@ title: TIBCO Platform Control Plane and Data Plane Setup on EKS
 - [Part 7: Configure Route53 and Certificates](#part-7-configure-route53-and-certificates)
 - [Part 8: Install Ingress Controller](#part-8-install-ingress-controller)
 - [Part 9: Control Plane Deployment](#part-9-control-plane-deployment)
+  - [Generate tibco-cp-base Values File](#generate-tibco-cp-base-values-file)
+    - [Option A — Simplified DNS + Nginx](#-simplified-dns--nginx-option-a)
+    - [Option B — Simplified DNS + Traefik](#-simplified-dns--traefik-option-b)
+    - [Option C — Simplified DNS + NGINX Gateway Fabric / Gateway API](#-simplified-dns--nginx-gateway-fabric--gateway-api-option-c)
+    - [Option D — Legacy DNS + Nginx](#-legacy-dns--nginx-option-d)
+    - [Option E — Legacy DNS + Traefik](#-legacy-dns--traefik-option-e)
+    - [Option F — Legacy DNS + NGINX Gateway Fabric / Gateway API](#-legacy-dns--nginx-gateway-fabric--gateway-api-option-f)
 - [Part 10: Data Plane Setup](#part-10-data-plane-setup)
 - [Part 11: Observability](#part-11-observability)
 - [Part 12: Post-Deployment Verification](#part-12-post-deployment-verification)
@@ -911,17 +918,18 @@ The `tibco-cp-base` chart supports Gateway API by creating `HTTPRoute` resources
 - `router-operator.gatewayRoute` routes Control Plane UI and API traffic (port `100`)
 - `hybrid-proxy.gatewayRoute` routes hybrid connectivity tunnel traffic (port `105`)
 
-#### Why Gateway API requires hostname-based routing for the tunnel
+#### How Gateway API routes tunnel traffic
 
-With classic **Nginx or Traefik Ingress**, the controller merges all Ingress rules into a shared configuration. The simplified DNS Ingress configurations above route `${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}/infra/tunnel` to `hybrid-proxy` and `${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}/` to `router-operator` — the path prefix is the discriminator, and it works because the controller merges both rules into a single rule set it evaluates together.
+From `tibco-cp-base` 1.19.0+, the `hybrid-proxy` chart conditionally applies path rules that mirror the `ingress.yaml` logic:
 
-With **Gateway API**, each service gets its own independent `HTTPRoute` resource. When two `HTTPRoute` objects both claim the same wildcard hostname (`*.${TP_BASE_DNS_DOMAIN}`) with different path prefixes, the Gateway controller must pick a winner per request — and this decision is implementation-specific. Some Gateway implementations handle it correctly; others do not, because HTTPRoute rules are evaluated per-resource, not merged. The `tibco-cp-base` chart also generates HTTPRoute rules without a configurable path prefix, so the chart cannot reproduce the `/infra/tunnel` path split on its own.
+| `dnsDomain` vs `dnsTunnelDomain` | `hybrid-proxy` HTTPRoute rules |
+|---|---|
+| Same (Simplified DNS) | `PathPrefix: /infra/tunnel` only |
+| Different (Separate domains) | `PathPrefix: /infra/tunnel` + `PathPrefix: /` |
 
-The portable, idiomatic Gateway API solution is **hostname separation**: assign `hybrid-proxy` a dedicated subdomain (`${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}`) and route `router-operator` to the admin and subscription hostnames. The Gateway controller dispatches by hostname before any path matching — the result is unambiguous and works identically across all Gateway API implementations.
+**Simplified DNS mode (recommended):** set both `hybrid-proxy` and `router-operator` to use `*.${TP_BASE_DNS_DOMAIN}` as the HTTPRoute hostname and set `dnsDomain == dnsTunnelDomain`. The chart renders only the `/infra/tunnel` rule for `hybrid-proxy`. Path specificity decides routing — `/infra/tunnel` → `hybrid-proxy`, everything else → `router-operator`. No extra DNS record or certificate is needed beyond the existing `*.${TP_BASE_DNS_DOMAIN}` wildcard.
 
-**Certificate:** your existing `*.${TP_BASE_DNS_DOMAIN}` wildcard covers `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` (one level of subdomain) — no additional certificate needed.
-
-**DNS:** add one Route 53 record: `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` → Gateway load balancer hostname. The Gateway load balancer hostname is shown by `kubectl get svc -n ${TP_GATEWAY_NAMESPACE}`.
+**Separate domain mode:** set `dnsDomain != dnsTunnelDomain` and give `hybrid-proxy` a dedicated tunnel subdomain hostname. The chart renders both `/infra/tunnel` and `/` rules for `hybrid-proxy`, routing all traffic on that subdomain to `hybrid-proxy`.
 
 > [!NOTE]
 > The `tibco-cp-base` Gateway API values are in the **Generate tibco-cp-base Values File** section in Part 9. The **Simplified DNS + NGINX Gateway Fabric** and **Legacy DNS + NGINX Gateway Fabric** options each produce a single self-contained file — no second overlay file needed.
@@ -1187,6 +1195,88 @@ kubectl create secret generic cporch-encryption-secret -n ${CP_INSTANCE_ID}-ns \
 
 > **Important:** Store both secrets securely (e.g., in AWS Secrets Manager) — they are needed for disaster recovery and upgrades.
 
+#### Container Registry Pull Secret
+
+Every `tibco-cp-base` pod spec references a Kubernetes image pull secret named
+`tibco-container-registry-credentials`. The secret must exist in the Control Plane namespace
+before pods start. Choose the variant that matches your registry setup:
+
+---
+
+**Variant 1 — Static username and password (TIBCO JFrog, private registries)**
+
+When `TP_CONTAINER_REGISTRY_USER` and `TP_CONTAINER_REGISTRY_PASSWORD` are non-empty, the
+`tibco-cp-base` chart creates `tibco-container-registry-credentials` automatically during
+`helm install`. No manual step is required in this case.
+
+If you prefer to create the secret explicitly (for example, to pre-validate credentials):
+
+```bash
+kubectl create secret docker-registry tibco-container-registry-credentials \
+  --docker-server="${TP_CONTAINER_REGISTRY_URL}" \
+  --docker-username="${TP_CONTAINER_REGISTRY_USER}" \
+  --docker-password="${TP_CONTAINER_REGISTRY_PASSWORD}" \
+  -n ${CP_INSTANCE_ID}-ns \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+---
+
+**Variant 2 — AWS ECR without IRSA**
+
+AWS ECR does not issue long-lived credentials. Tokens from `aws ecr get-login-password` expire
+after 12 hours. Create the secret manually before `helm install` and refresh it before each
+upgrade:
+
+```bash
+ECR_TOKEN=$(aws ecr get-login-password --region ${TP_CLUSTER_REGION})
+
+kubectl create secret docker-registry tibco-container-registry-credentials \
+  --docker-server="${TP_CONTAINER_REGISTRY_URL}" \
+  --docker-username=AWS \
+  --docker-password="${ECR_TOKEN}" \
+  -n ${CP_INSTANCE_ID}-ns \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Leave `TP_CONTAINER_REGISTRY_USER` and `TP_CONTAINER_REGISTRY_PASSWORD` empty in `env.sh` so
+the chart does not attempt to recreate the secret with invalid credentials on the next `helm
+upgrade`.
+
+> [!NOTE]
+> To avoid the 12-hour token expiry, deploy a CronJob that re-runs the above command every 6
+> hours using static IAM Access Keys (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) stored in
+> a separate Kubernetes secret.
+
+---
+
+**Variant 3 — AWS ECR with IRSA (recommended for EKS)**
+
+IRSA (IAM Roles for Service Accounts) lets EKS worker nodes authenticate with ECR via IAM
+without any Kubernetes pull secret. No `tibco-container-registry-credentials` secret is needed.
+
+1. Create an IAM role with the `AmazonEC2ContainerRegistryReadOnly` policy and an OIDC trust
+   relationship to your EKS cluster.
+2. Annotate the Control Plane service account after it is created:
+
+```bash
+kubectl annotate serviceaccount ${CP_INSTANCE_ID}-sa \
+  -n ${CP_INSTANCE_ID}-ns \
+  eks.amazonaws.com/role-arn=arn:aws:iam::${AWS_ACCOUNT_ID}:role/<ECR-READ-ROLE>
+```
+
+3. Leave `TP_CONTAINER_REGISTRY_USER` and `TP_CONTAINER_REGISTRY_PASSWORD` empty in `env.sh`.
+   ECR authentication happens at the node level — no secret reference is needed in the values
+   file.
+
+---
+
+Regardless of variant, confirm the secret exists before running `helm install`:
+
+```bash
+kubectl get secret tibco-container-registry-credentials -n ${CP_INSTANCE_ID}-ns
+```
+
 ### Set Post-Creation Variables
 
 Before generating the values file, set the variables that are only available after the RDS instance is created:
@@ -1321,6 +1411,8 @@ global:
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
       repository: "tibco-platform-docker-prod"
+    imagePullSecrets:
+      - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
     networkPolicy:
       database:
@@ -1454,6 +1546,8 @@ global:
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
       repository: "tibco-platform-docker-prod"
+    imagePullSecrets:
+      - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
     networkPolicy:
       database:
@@ -1518,17 +1612,17 @@ EOF
 
 #### 🔷 Simplified DNS + NGINX Gateway Fabric / Gateway API (Option C)
 
-> [!IMPORTANT]
-> **Why Gateway API uses hostname separation instead of the `/infra/tunnel` path:**
+> [!NOTE]
+> **Simplified DNS with path-based routing:** both `hybrid-proxy` and `router-operator` share
+> the `*.${TP_BASE_DNS_DOMAIN}` wildcard hostname. Setting `dnsDomain == dnsTunnelDomain` causes
+> the `hybrid-proxy` chart to render only a `PathPrefix: /infra/tunnel` rule — no `/` catch-all.
+> Path specificity routes tunnel traffic to `hybrid-proxy` and all other paths to `router-operator`
+> cleanly across all Gateway API implementations.
 >
-> With Nginx or Traefik Ingress (Options A and B), the ingress controller merges all rules into a shared rule set. Traffic to `${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}/infra/tunnel` goes to `hybrid-proxy`; traffic to `${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}/` goes to `router-operator` — the path is the discriminator and the controller enforces it reliably.
+> No extra Route 53 record or ACM certificate is needed beyond the existing `*.${TP_BASE_DNS_DOMAIN}`
+> wildcard already used by Options A and B.
 >
-> With Gateway API, each service has its own independent `HTTPRoute` resource. Two `HTTPRoute` objects claiming the same wildcard hostname (`*.${TP_BASE_DNS_DOMAIN}`) with different path prefixes create ambiguity: the Gateway controller's choice between them is implementation-specific and may not work as expected. The `tibco-cp-base` chart also does not expose a configurable path prefix for its generated HTTPRoute rules, so the path-based split cannot be reproduced through chart values alone.
->
-> The correct Gateway API approach is **hostname separation**: `hybrid-proxy` gets a dedicated subdomain (`${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}`) while `router-operator` handles the admin and subscription hostnames. The Gateway controller routes by hostname first — unambiguous across all Gateway API implementations.
->
-> **Certificate:** your `*.${TP_BASE_DNS_DOMAIN}` wildcard covers `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` — no extra certificate needed.
-> **DNS:** create one Route 53 record: `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` → Gateway load balancer hostname (`kubectl get svc -n ${TP_GATEWAY_NAMESPACE}`).
+> To confirm your installed GatewayClass name: `kubectl get gatewayclass`
 
 ```bash
 cat > aws-tibco-cp-base-simplified-gateway-api.yaml <(envsubst \
@@ -1546,14 +1640,15 @@ cat > aws-tibco-cp-base-simplified-gateway-api.yaml <(envsubst \
 # =============================================================================
 # TIBCO CP BASE — Simplified DNS + NGINX Gateway Fabric (Gateway API)
 #
-# Routing strategy: hostname separation.
-# hybrid-proxy  → ${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}  (HTTPRoute)
-# router-operator → ${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}  (HTTPRoute)
-#                   ${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}        (HTTPRoute)
+# Routing strategy: path-based, shared wildcard hostname.
+# hybrid-proxy  → *.${TP_BASE_DNS_DOMAIN}/infra/tunnel  (HTTPRoute)
+# router-operator → *.${TP_BASE_DNS_DOMAIN}/             (HTTPRoute)
 #
-# Certificate: *.${TP_BASE_DNS_DOMAIN} covers the tunnel subdomain — no extra cert.
-# DNS: add Route 53 record for ${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}
-#      pointing to the Gateway load balancer.
+# dnsDomain == dnsTunnelDomain → chart renders only PathPrefix:/infra/tunnel
+# for hybrid-proxy; no / catch-all, so no route conflict with router-operator.
+#
+# Certificate: existing *.${TP_BASE_DNS_DOMAIN} wildcard — no extra cert.
+# DNS: no extra record required.
 # =============================================================================
 hybrid-proxy:
   enabled: true
@@ -1563,7 +1658,7 @@ hybrid-proxy:
     enabled: true
     controllerName: "${TP_GATEWAY_CLASS}"
     hostnames:
-    - '${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}'
+    - '*.${TP_BASE_DNS_DOMAIN}'
     parentRefs:
     - name: "${TP_GATEWAY_NAME}"
       namespace: "${TP_GATEWAY_NAMESPACE}"
@@ -1584,8 +1679,7 @@ router-operator:
     enabled: true
     controllerName: "${TP_GATEWAY_CLASS}"
     hostnames:
-    - '${CP_ADMIN_HOST_PREFIX}.${TP_BASE_DNS_DOMAIN}'
-    - '${CP_SUBSCRIPTION}.${TP_BASE_DNS_DOMAIN}'
+    - '*.${TP_BASE_DNS_DOMAIN}'
     parentRefs:
     - name: "${TP_GATEWAY_NAME}"
       namespace: "${TP_GATEWAY_NAMESPACE}"
@@ -1602,6 +1696,8 @@ global:
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
       repository: "tibco-platform-docker-prod"
+    imagePullSecrets:
+      - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
     networkPolicy:
       database:
@@ -1630,12 +1726,11 @@ global:
       podCIDR: "${TP_VPC_CIDR}"
       serviceCIDR: "${TP_SERVICE_CIDR}"
 
-    # Gateway API uses hostname separation for the tunnel.
-    # dnsDomain covers normal router traffic (admin + subscription hosts).
-    # dnsTunnelDomain is the dedicated tunnel subdomain — still under TP_BASE_DNS_DOMAIN,
-    # so no extra ACM certificate is required.
+    # Simplified DNS: dnsDomain == dnsTunnelDomain.
+    # The hybrid-proxy chart renders only PathPrefix:/infra/tunnel (no / catch-all)
+    # when both values are identical, so path specificity routes cleanly.
     dnsDomain: "${TP_BASE_DNS_DOMAIN}"
-    dnsTunnelDomain: "${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}"
+    dnsTunnelDomain: "${TP_BASE_DNS_DOMAIN}"
 
     db_host: "${TP_DB_HOST}"
     db_master_writer_host: "${TP_DB_HOST}"
@@ -1742,6 +1837,8 @@ global:
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
       repository: "tibco-platform-docker-prod"
+    imagePullSecrets:
+      - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
     networkPolicy:
       database:
@@ -1864,6 +1961,8 @@ global:
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
       repository: "tibco-platform-docker-prod"
+    imagePullSecrets:
+      - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
     networkPolicy:
       database:
@@ -1995,6 +2094,8 @@ global:
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
       repository: "tibco-platform-docker-prod"
+    imagePullSecrets:
+      - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
     networkPolicy:
       database:

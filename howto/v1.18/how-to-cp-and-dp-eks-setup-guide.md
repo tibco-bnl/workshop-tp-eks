@@ -148,7 +148,9 @@ EOF
 
 Use a second values file with the generated `aws-tibco-cp-base-values.yaml` file. This keeps the base CP values unchanged and only swaps router and hybrid-proxy routing from classic `Ingress` to Gateway API `HTTPRoute`.
 
-> **Important:** The current `tibco-cp-base` Gateway API values create root-path `HTTPRoute` rules. For a full CP+DP installation with hybrid connectivity, use a separate tunnel hostname with Gateway API, or keep the shared-domain `/infra/tunnel` route on the baseline Ingress model.
+> **Note:** From `tibco-cp-base` 1.19.0+, the `hybrid-proxy` chart renders only a `PathPrefix: /infra/tunnel` rule when `dnsDomain == dnsTunnelDomain` (simplified DNS mode). Set both `hybrid-proxy` and `router-operator` to use the same wildcard hostname (e.g. `*.aws.example.com`). Path specificity routes tunnel traffic to `hybrid-proxy` and all other traffic to `router-operator` — no separate tunnel hostname or extra DNS record required.
+>
+> To confirm the installed GatewayClass name: `kubectl get gatewayclass`
 
 ```yaml
 router-operator:
@@ -162,8 +164,7 @@ router-operator:
         namespace: nginx-gateway
         sectionName: http
     hostnames:
-      - "admin.aws.example.com"
-      - "dev.aws.example.com"
+      - "*.aws.example.com"
 
 hybrid-proxy:
   enabled: true
@@ -177,11 +178,11 @@ hybrid-proxy:
         namespace: nginx-gateway
         sectionName: http
     hostnames:
-      - "cp1-tunnel.aws.example.com"
+      - "*.aws.example.com"
 
 global:
   external:
-    dnsTunnelDomain: "cp1-tunnel.aws.example.com"
+    dnsTunnelDomain: "aws.example.com"    # same as dnsDomain — simplified DNS
 ```
 
 Install with the Gateway API override:
