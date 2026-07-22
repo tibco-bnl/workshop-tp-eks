@@ -148,16 +148,17 @@ EOF
 
 Use a second values file with the generated `aws-tibco-cp-base-values.yaml` file. This keeps the base CP values unchanged and only swaps router and hybrid-proxy routing from classic `Ingress` to Gateway API `HTTPRoute`.
 
-> **Note (1.18):** In `tibco-cp-base` 1.18, the `hybrid-proxy` chart always generates both `PathPrefix: /infra/tunnel` and `PathPrefix: /` rules. Use hostname separation — assign `hybrid-proxy` a dedicated tunnel subdomain hostname and set `dnsTunnelDomain` to that subdomain. `router-operator` uses the wildcard hostname; the Gateway dispatches by hostname first.
+> **Note (1.18 — defect PCP-21362):** In `tibco-cp-base` 1.18, the `hybrid-proxy` chart only generates a catch-all `PathPrefix: /` rule — `PathPrefix: /infra/tunnel` is **missing**. You must explicitly add both path rules in `gatewayRoute.rules` in your values file. Use hostname separation — assign `hybrid-proxy` a dedicated tunnel subdomain hostname so the Gateway dispatches by hostname first. `router-operator` uses the wildcard hostname.
 >
-> **Upcoming (1.19.0+):** when `dnsDomain == dnsTunnelDomain`, the chart renders only `PathPrefix: /infra/tunnel` for `hybrid-proxy` — allowing both services to share `*.aws.example.com` without hostname separation.
+> **Upcoming (1.19.0+):** when `dnsDomain == dnsTunnelDomain`, the chart will auto-generate only `PathPrefix: /infra/tunnel` for `hybrid-proxy` — allowing both services to share `*.aws.example.com` without hostname separation.
 >
 > To confirm the installed GatewayClass name: `kubectl get gatewayclass`
 
 ```yaml
 # Hostname separation (required in 1.18): hybrid-proxy gets a dedicated tunnel subdomain.
-# The 1.18 chart generates PathPrefix:/infra/tunnel + PathPrefix:/ for hybrid-proxy.
-# Gateway dispatches by hostname first — the more specific tunnel subdomain always wins.
+# In 1.18, the chart only generates PathPrefix:/ for hybrid-proxy (PCP-21362).
+# PathPrefix:/infra/tunnel is missing — add both rules explicitly as a workaround.
+# Gateway dispatches by hostname first — the tunnel subdomain always wins.
 hybrid-proxy:
   enabled: true
   ingress:
@@ -171,6 +172,21 @@ hybrid-proxy:
         sectionName: http
     hostnames:
       - "cp1-tunnel.aws.example.com"
+    rules:
+    - matches:
+      - path:
+          type: PathPrefix
+          value: /infra/tunnel
+      backendRefs:
+      - name: hybrid-proxy
+        port: 105
+    - matches:
+      - path:
+          type: PathPrefix
+          value: /
+      backendRefs:
+      - name: hybrid-proxy
+        port: 105
 
 router-operator:
   ingress:
