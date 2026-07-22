@@ -148,12 +148,18 @@ EOF
 
 Use a second values file with the generated `aws-tibco-cp-base-values.yaml` file. This keeps the base CP values unchanged and only swaps router and hybrid-proxy routing from classic `Ingress` to Gateway API `HTTPRoute`.
 
-> **Note:** From `tibco-cp-base` 1.19.0+, the `hybrid-proxy` chart renders only a `PathPrefix: /infra/tunnel` rule when `dnsDomain == dnsTunnelDomain` (simplified DNS mode). Set both `hybrid-proxy` and `router-operator` to use the same wildcard hostname (e.g. `*.aws.example.com`). Path specificity routes tunnel traffic to `hybrid-proxy` and all other traffic to `router-operator` — no separate tunnel hostname or extra DNS record required.
+> **Note (1.18):** In `tibco-cp-base` 1.18, the `hybrid-proxy` chart always generates both `PathPrefix: /infra/tunnel` and `PathPrefix: /` rules. Use hostname separation — assign `hybrid-proxy` a dedicated tunnel subdomain hostname and set `dnsTunnelDomain` to that subdomain. `router-operator` uses the wildcard hostname; the Gateway dispatches by hostname first.
+>
+> **Upcoming (1.19.0+):** when `dnsDomain == dnsTunnelDomain`, the chart renders only `PathPrefix: /infra/tunnel` for `hybrid-proxy` — allowing both services to share `*.aws.example.com` without hostname separation.
 >
 > To confirm the installed GatewayClass name: `kubectl get gatewayclass`
 
 ```yaml
-router-operator:
+# Hostname separation (required in 1.18): hybrid-proxy gets a dedicated tunnel subdomain.
+# The 1.18 chart generates PathPrefix:/infra/tunnel + PathPrefix:/ for hybrid-proxy.
+# Gateway dispatches by hostname first — the more specific tunnel subdomain always wins.
+hybrid-proxy:
+  enabled: true
   ingress:
     enabled: false
   gatewayRoute:
@@ -164,10 +170,9 @@ router-operator:
         namespace: nginx-gateway
         sectionName: http
     hostnames:
-      - "*.aws.example.com"
+      - "cp1-tunnel.aws.example.com"
 
-hybrid-proxy:
-  enabled: true
+router-operator:
   ingress:
     enabled: false
   gatewayRoute:
@@ -182,7 +187,8 @@ hybrid-proxy:
 
 global:
   external:
-    dnsTunnelDomain: "aws.example.com"    # same as dnsDomain — simplified DNS
+    dnsDomain: "aws.example.com"
+    dnsTunnelDomain: "cp1-tunnel.aws.example.com"    # dedicated tunnel subdomain — hostname separation
 ```
 
 Install with the Gateway API override:
