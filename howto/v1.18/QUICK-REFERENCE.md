@@ -5,7 +5,7 @@ title: TIBCO Platform v1.18.0 Quick Reference Guide - EKS
 
 # TIBCO Platform v1.18.0 Quick Reference Guide - EKS
 
-**TIBCO Platform Version**: 1.18.0 | **Platform**: Amazon EKS | **Status**: Current release
+**TIBCO Platform Version**: 1.18.0 | **Platform**: Amazon EKS | **Status**: Previous release
 
 ## Quick Access URLs
 

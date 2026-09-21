@@ -552,7 +552,9 @@ Each cloud-native Data Plane can host the following capabilities:
 ## Related Guides
 
 - [CP and DP Setup Guide (EKS)](./how-to-cp-and-dp-eks-setup-guide) — base EKS cluster and platform setup
-- [1.18.0 EKS Overlay Guide](./v1.18/how-to-cp-and-dp-eks-setup-guide) — 1.18.0-specific changes and upgrade checklist
-- [1.18.0 Quick Reference](./v1.18/QUICK-REFERENCE) — essential commands and chart versions
-- [Release Notes v1.18.0](../releases/v1.18.0) — component versions and known issues
+- [1.20.0 EKS Overlay Guide](./v1.20/how-to-cp-and-dp-eks-setup-guide) — 1.20.0-specific changes and upgrade checklist
+- [1.20.0 Quick Reference](./v1.20/QUICK-REFERENCE) — essential commands and chart versions
+- [Release Notes v1.20.0](../releases/v1.20.0) — component versions and known issues
+- [1.19.0 EKS Overlay Guide](./v1.19/how-to-cp-and-dp-eks-setup-guide) — mandatory upgrade hop from 1.18.0
+- [Release Notes v1.19.0](../releases/v1.19.0) — 1.19.0 component versions and known issues
 - [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm)

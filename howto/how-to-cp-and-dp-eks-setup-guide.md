@@ -13,18 +13,21 @@ title: TIBCO Platform Control Plane and Data Plane Setup on EKS
 
 **Estimated Time**: 4-6 hours (first-time installation)
 
-**Last Updated**: June 11, 2026 (v1.18.0)
+**Last Updated**: September 21, 2026 (v1.20.0)
 
 > **Note:** This workshop is NOT meant for production deployment.
 
-> **Version note:** This is the shared EKS CP+DP baseline guide. It now includes the 1.17.0 simplified DNS updates and the current 1.18.0 Control Plane guidance. For release-specific overlays, start with [v1.17](./v1.17/DOCUMENTATION-SUMMARY) or [v1.18](./v1.18/how-to-cp-and-dp-eks-setup-guide).
+> **Version note:** This is the shared EKS CP+DP baseline guide. It includes the 1.17.0 simplified DNS updates and the current 1.20.0 Control Plane guidance. For release-specific overlays, start with [v1.20](./v1.20/how-to-cp-and-dp-eks-setup-guide); the [v1.19 overlay](./v1.19/how-to-cp-and-dp-eks-setup-guide) is the mandatory upgrade hop from 1.18.0, and [v1.18](./v1.18/how-to-cp-and-dp-eks-setup-guide) is kept for reference.
 
-> **Version 1.18.0 Update**: Key changes from 1.17.0:
-> - Gateway API controller support for Control Plane and Control Tower data planes; EKS users can evaluate NGINX Gateway Fabric, Traefik, Istio, NetScaler, and other supported Gateway API controllers where capabilities support them
-> - Namespace-level RBAC for Data Plane resources; Application Manager and Application Viewer grants may need namespace assignments
-> - Email server configuration moved from `tibco-cp-base` Helm values to the TIBCO Platform Console
-> - Simplified DNS remains recommended: one Route 53 base domain, one wildcard ACM certificate, and tunnel traffic routed on the shared domain
-> - Updated `tibco-cp-base` chart to version 1.18.0
+> **Version 1.20.0 Update**: Key changes from 1.18.0 (details in the [v1.19.0](../releases/v1.19.0) and [v1.20.0](../releases/v1.20.0) release notes):
+> - `tibco-cp-base` chart pinned to 1.20.0; `dp-configure-namespace` 1.20.0 and `dp-core-infrastructure` 1.20.3
+> - `global.tibco.networkPolicy.createDeprecatedPolicies` was removed in 1.19.0; delete it from existing values files
+> - `otel-collector.enabled` chart default is `false` in 1.20.0 (it was `true` in 1.19.0); this guide sets it explicitly
+> - New `global.tibco.disabledInfraCapabilities` value in 1.20.0 (chart default `[MFTADAPTER]`)
+> - Gateway API: since 1.19.0 the `hybrid-proxy` HTTPRoute renders `/infra/tunnel` itself, so simplified DNS no longer needs hostname separation (PCP-21362 fixed)
+> - Control Plane rollback is supported from 1.20.0 (`helm rollback`); record `helm history` before upgrading
+> - Upstream EKS workshop now creates the Aurora cluster parameter group with the AWS CLI (`dbClusterParameterGroupName`) and keeps `rds.force_ssl=1`
+> - Email server configuration stays in the TIBCO Platform Console (since 1.18.0); simplified DNS remains recommended
 
 ---
 
@@ -152,9 +155,9 @@ The complete list of variables used in this guide, organized by purpose. All are
 | `TP_DB_SSL_CERT_KEY` | `rds-ca-bundle.pem` | Key (filename) inside the SSL cert secret |
 | `TP_DB_SSL_ROOT_CERT_PATH` | `/etc/ssl/certs/rds-ca-bundle.pem` | Mount path for the CA cert inside CP pods |
 
-**Email (configure after deploying tibco-cp-base in 1.18.0)**
+**Email (configure after deploying tibco-cp-base; Console-managed since 1.18.0)**
 
-In TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 Helm values file. The only remaining email-related value in `tibco-cp-base` is `global.tibco.networkPolicy.emailServer`, which is optional egress NetworkPolicy configuration and is not an email provider configuration.
+Since TIBCO Platform 1.18.0 (current release 1.20.0), email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 or later Helm values file. The only remaining email-related value in `tibco-cp-base` is `global.tibco.networkPolicy.emailServer`, which is optional egress NetworkPolicy configuration and is not an email provider configuration.
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
@@ -859,7 +862,7 @@ Gateway API is the Kubernetes successor to the older `Ingress` API. Instead of a
 - `Gateway` represents the listener and load-balancer entry point.
 - `HTTPRoute` attaches application routes to a Gateway and points traffic to Kubernetes services.
 
-The official TIBCO Platform requirements list Gateway API controller support for both Control Plane and data plane usage. For TIBCO Platform 1.18.0, supported Gateway API controllers include NGINX Gateway Fabric 2.3.0, Istio 1.28.2, Traefik `traefik-39.0.7`, NetScaler `netscaler-cpx-with-gateway-controller-2.0.0`, and the `Other Gateway API Controller` option for data plane controllers that are not listed explicitly.
+The official TIBCO Platform requirements list Gateway API controller support for both Control Plane and data plane usage. For TIBCO Platform 1.20.0 (unchanged since 1.18.0), supported Gateway API controllers include NGINX Gateway Fabric 2.3.0, Istio 1.28.2, Traefik `traefik-39.0.7`, NetScaler `netscaler-cpx-with-gateway-controller-2.0.0`, and the `Other Gateway API Controller` option for data plane controllers that are not listed explicitly.
 
 For this EKS workshop, keep the default ALB plus Nginx or Traefik ingress path unless you are intentionally validating Gateway API. Gateway API changes the Kubernetes resources created for endpoint exposure, but it does not remove the need for DNS, certificates, network policies, storage, PostgreSQL, or the TIBCO container registry.
 
@@ -920,19 +923,17 @@ The `tibco-cp-base` chart supports Gateway API by creating `HTTPRoute` resources
 
 #### How Gateway API routes tunnel traffic
 
-In `tibco-cp-base` 1.18, the `hybrid-proxy` chart only generates a catch-all `PathPrefix: /` rule — the `PathPrefix: /infra/tunnel` rule is **missing** (defect PCP-21362). Tunnel traffic therefore never reaches `hybrid-proxy` unless you explicitly add both path rules in the Helm values.
+Since `tibco-cp-base` 1.19.0 the `hybrid-proxy` chart renders the HTTPRoute path rules itself from `global.external.dnsDomain` and `global.external.dnsTunnelDomain` (fix for defect PCP-21362, which in 1.18 left only a catch-all `PathPrefix: /`):
 
-**Workaround for 1.18:** use hostname separation and explicitly specify both rules in `gatewayRoute`:
-
-| Service | HTTPRoute hostname | Path rules (explicitly set in values) |
+| `dnsDomain` vs `dnsTunnelDomain` | `hybrid-proxy` HTTPRoute rules | `router-operator` HTTPRoute rules |
 |---|---|---|
-| `hybrid-proxy` | `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` | `PathPrefix: /infra/tunnel` + `PathPrefix: /` |
-| `router-operator` | `*.${TP_BASE_DNS_DOMAIN}` | `PathPrefix: /` (chart default) |
+| Equal (simplified DNS) | `PathPrefix: /infra/tunnel` only | `PathPrefix: /` |
+| Different (legacy split DNS) | `PathPrefix: /infra/tunnel` and `PathPrefix: /` | `PathPrefix: /` |
 
-The Gateway controller routes by hostname first: requests to `${CP_INSTANCE_ID}-tunnel.*` always go to `hybrid-proxy`; requests to `admin.*` or `subscription.*` match the wildcard and go to `router-operator`.
+With simplified DNS both HTTPRoutes can therefore share the `*.${TP_BASE_DNS_DOMAIN}` hostname on the same Gateway: Gateway API precedence sends `/infra/tunnel` to `hybrid-proxy` because it is the longer path match, and everything else to `router-operator`. Hostname separation (a dedicated `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` hostname for `hybrid-proxy`) still works but is no longer required.
 
-> [!NOTE]
-> **From `tibco-cp-base` 1.19.0+ (upcoming):** the chart will automatically generate the correct path rules based on `dnsDomain` vs `dnsTunnelDomain` — when `dnsDomain == dnsTunnelDomain`, only `PathPrefix: /infra/tunnel` is rendered for `hybrid-proxy`, enabling shared wildcard hostname without hostname separation or explicit rules.
+> [!IMPORTANT]
+> The `hybrid-proxy` and `router-operator` templates do not read a `gatewayRoute.rules` value in any chart version. If your 1.18 values file contains the explicit `rules:` workaround, remove it; only `enabled`, `controllerName`, `parentRefs`, `hostnames`, `name`, and `annotations` are used.
 
 > [!NOTE]
 > The `tibco-cp-base` Gateway API values are in the **Generate tibco-cp-base Values File** section in Part 9. The **Simplified DNS + NGINX Gateway Fabric** and **Legacy DNS + NGINX Gateway Fabric** options each produce a single self-contained file — no second overlay file needed.
@@ -1148,7 +1149,7 @@ kubectl get ingressclass
 | EFS storage class | `efs-sc` | Used for CP persistent storage |
 | RDS DB instance ARN (CLI) | `arn:aws:rds:<region>:<account>:db:${TP_CLUSTER_NAME}-db` | Connection details |
 | RDS details (Crossplane) | Secret `${CP_INSTANCE_ID}-aurora-details` in `${CP_INSTANCE_ID}-ns` | |
-| Network Policies | [CP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/control-plane-network-policies.htm) | |
+| Network Policies | [CP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/control-plane-network-policies.htm) | |
 
 ### Create Namespace and Service Account (CLI method only)
 
@@ -1174,7 +1175,7 @@ kubectl create serviceaccount ${CP_INSTANCE_ID}-sa -n ${CP_INSTANCE_ID}-ns
 
 **Why:** The TIBCO Control Plane router pods use these cryptographic keys to sign and verify user session tokens. `TSC_SESSION_KEY` signs tokens for the TSC (TIBCO Subscription Console) domain. `DOMAIN_SESSION_KEY` signs tokens for custom domain routing. Without this secret, the router pods crash on startup with a missing secret error. The keys must remain stable across upgrades — if they change, all active user sessions are immediately invalidated.
 
-Reference: [TIBCO CP secret requirements](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
+Reference: [TIBCO CP secret requirements](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
 
 ```bash
 export TSC_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
@@ -1302,7 +1303,7 @@ Set admin variables and record email settings for the Console (all defined in `s
 ```bash
 # Email configuration moved to Platform Console in TIBCO Platform 1.18.0.
 # Keep these values available for the post-install Console configuration, but do not
-# include the deprecated global.external email Helm values in 1.18.0 values.
+# include the deprecated global.external email Helm values in 1.18.0 or later values.
 export TP_EMAIL_SERVER_TYPE="ses"                       # "ses", "smtp", "sendgrid", or "graph"
 export TP_FROM_EMAIL="noreply@${TP_HOSTED_ZONE_DOMAIN}" # From address for CP notifications
 export TP_EMAIL_SERVER_CIDR=""                          # Optional egress NetworkPolicy CIDR only
@@ -1319,7 +1320,7 @@ export TP_ADMIN_INITIAL_PASSWORD="ChangeMeNow!1"   # Must be changed after first
 
 ### Generate tibco-cp-base Values File
 
-**Why:** The `tibco-cp-base` chart (v1.18.0) is the main TIBCO Control Plane Helm chart. It deploys the router, orchestrator, hybrid proxy, and all CP microservices. Generating a named file (rather than passing all values inline) keeps the configuration auditable and re-usable across upgrades.
+**Why:** The `tibco-cp-base` chart (v1.20.0) is the main TIBCO Control Plane Helm chart. It deploys the router, orchestrator, hybrid proxy, and all CP microservices. Generating a named file (rather than passing all values inline) keeps the configuration auditable and re-usable across upgrades.
 
 > **Source:** [`tp-helm-charts/charts/tibco-cp-base/values.yaml`](https://github.com/TIBCOSoftware/tp-helm-charts/blob/main/charts/tibco-cp-base/values.yaml)
 
@@ -1334,7 +1335,7 @@ Choose the file that matches your DNS approach and ingress controller. Each file
 | Legacy DNS | Traefik | `aws-tibco-cp-base-legacy-traefik.yaml` |
 | Legacy DNS | NGINX Gateway Fabric (Gateway API) | `aws-tibco-cp-base-legacy-gateway-api.yaml` |
 
-> **Email note for 1.18.0:** Do not add `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` to any values file. Configure email in Platform Console after deployment. The `global.tibco.networkPolicy.emailServer` block only controls optional egress NetworkPolicy creation and does not configure any email provider.
+> **Email note (1.18.0 and later):** Do not add `global.external.emailServerType`, `global.external.emailServer`, `global.external.fromAndReplyToEmailAddress`, `global.external.cronJobReportsEmailAlias`, or `global.external.platformEmailNotificationCcAddresses` to any values file. Configure email in Platform Console after deployment. The `global.tibco.networkPolicy.emailServer` block only controls optional egress NetworkPolicy creation and does not configure any email provider.
 
 Set the variable for your chosen file before running the helm command:
 
@@ -1616,18 +1617,14 @@ EOF
 #### 🔷 Simplified DNS + NGINX Gateway Fabric / Gateway API (Option C)
 
 > [!NOTE]
-> **Hostname separation required in 1.18:** the chart always generates both `PathPrefix: /infra/tunnel`
-> and `PathPrefix: /` for `hybrid-proxy`. To avoid a routing conflict with `router-operator`'s `/` rule,
-> assign `hybrid-proxy` a dedicated tunnel subdomain hostname (`${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}`)
-> and set `dnsTunnelDomain` to that subdomain. The Gateway controller dispatches by hostname first —
-> requests to the tunnel subdomain go to `hybrid-proxy`, requests to the admin/subscription hosts go to
-> `router-operator`.
+> **Shared wildcard hostname (tibco-cp-base 1.19.0 and later):** with `dnsDomain == dnsTunnelDomain` the chart
+> renders only `PathPrefix: /infra/tunnel` for `hybrid-proxy` and `PathPrefix: /` for `router-operator`, so both
+> HTTPRoutes attach to `*.${TP_BASE_DNS_DOMAIN}` on the same Gateway. No dedicated tunnel subdomain, no extra
+> Route 53 record, and no extra ACM certificate are needed; the existing `*.${TP_BASE_DNS_DOMAIN}` wildcard covers everything.
 >
-> **From `tibco-cp-base` 1.19.0+ (upcoming):** setting `dnsDomain == dnsTunnelDomain` eliminates the
-> `/` catch-all, allowing both services to share `*.${TP_BASE_DNS_DOMAIN}` without hostname separation.
->
-> The `*.${TP_BASE_DNS_DOMAIN}` wildcard certificate already covers the tunnel subdomain — no extra ACM cert needed.
-> Add one Route 53 alias record: `${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}` → Gateway load balancer hostname.
+> If you are still on `tibco-cp-base` 1.18.x, keep the hostname-separation layout (`${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}`
+> for `hybrid-proxy`, matching Route 53 alias record, and `dnsTunnelDomain` set to that subdomain) described in the
+> [1.18 overlay](./v1.18/how-to-cp-and-dp-eks-setup-guide).
 >
 > To confirm your installed GatewayClass name: `kubectl get gatewayclass`
 
@@ -1647,16 +1644,16 @@ cat > aws-tibco-cp-base-simplified-gateway-api.yaml <(envsubst \
 # =============================================================================
 # TIBCO CP BASE — Simplified DNS + NGINX Gateway Fabric (Gateway API)
 #
-# Routing strategy: hostname separation (required in 1.18).
-# hybrid-proxy    → ${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}  (HTTPRoute)
-# router-operator → *.${TP_BASE_DNS_DOMAIN}                          (HTTPRoute)
+# Routing strategy (tibco-cp-base 1.19.0+): shared wildcard hostname.
+# hybrid-proxy    → *.${TP_BASE_DNS_DOMAIN}  (HTTPRoute, chart renders PathPrefix:/infra/tunnel)
+# router-operator → *.${TP_BASE_DNS_DOMAIN}  (HTTPRoute, chart renders PathPrefix:/)
 #
-# In 1.18, the chart only generates PathPrefix:/ for hybrid-proxy (PCP-21362).
-# PathPrefix:/infra/tunnel is missing from the chart — must be added explicitly.
-# Both rules below are required; Gateway dispatches by hostname first.
+# Because dnsDomain == dnsTunnelDomain the chart omits the catch-all "/" rule for
+# hybrid-proxy, so the longer /infra/tunnel match wins for tunnel traffic.
+# The chart does not read gatewayRoute.rules — do not add explicit rules.
 #
-# Certificate: *.${TP_BASE_DNS_DOMAIN} wildcard covers the tunnel subdomain — no extra cert.
-# DNS: add Route 53 alias: ${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN} → Gateway LB hostname.
+# Certificate: one *.${TP_BASE_DNS_DOMAIN} ACM wildcard. DNS: one Route 53 alias
+# *.${TP_BASE_DNS_DOMAIN} → Gateway LB hostname.
 # =============================================================================
 hybrid-proxy:
   enabled: true
@@ -1666,28 +1663,13 @@ hybrid-proxy:
     enabled: true
     controllerName: "${TP_GATEWAY_CLASS}"
     hostnames:
-    - '${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}'
+    - '*.${TP_BASE_DNS_DOMAIN}'
     parentRefs:
     - name: "${TP_GATEWAY_NAME}"
       namespace: "${TP_GATEWAY_NAMESPACE}"
-    rules:
-    - matches:
-      - path:
-          type: PathPrefix
-          value: /infra/tunnel
-      backendRefs:
-      - name: hybrid-proxy
-        port: 105
-    - matches:
-      - path:
-          type: PathPrefix
-          value: /
-      backendRefs:
-      - name: hybrid-proxy
-        port: 105
 
 otel-collector:
-  enabled: true
+  enabled: true         # set explicitly: chart default is false in 1.20.0 (true in 1.19.0); requires logserver below
 
 router-operator:
   tscSessionKey:
@@ -1749,11 +1731,10 @@ global:
       podCIDR: "${TP_VPC_CIDR}"
       serviceCIDR: "${TP_SERVICE_CIDR}"
 
-    # Hostname separation: dnsTunnelDomain is the dedicated tunnel subdomain.
-    # In 1.18, PathPrefix:/infra/tunnel is NOT generated by the chart (PCP-21362).
-    # The explicit rules above add it as a workaround.
+    # Simplified DNS: same base domain for router and tunnel traffic.
+    # Equal values make the chart render only PathPrefix:/infra/tunnel for hybrid-proxy (1.19.0+).
     dnsDomain: "${TP_BASE_DNS_DOMAIN}"
-    dnsTunnelDomain: "${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}"
+    dnsTunnelDomain: "${TP_BASE_DNS_DOMAIN}"
 
     db_host: "${TP_DB_HOST}"
     db_master_writer_host: "${TP_DB_HOST}"
@@ -1784,19 +1765,20 @@ EOF
 )
 ```
 
-Verify the HTTPRoute has both explicit path rules:
+Verify the HTTPRoutes rendered by the chart:
 
 ```bash
 kubectl get httproute -n ${CP_INSTANCE_ID}-ns
-kubectl describe httproute -n ${CP_INSTANCE_ID}-ns
+kubectl get httproute -n ${CP_INSTANCE_ID}-ns hybrid-proxy \
+  -o jsonpath='{.spec.hostnames}{"  "}{.spec.rules[*].matches[*].path.value}{"\n"}'
 ```
 
-Expected `hybrid-proxy` HTTPRoute (from the explicit values above):
+Expected `hybrid-proxy` HTTPRoute (rendered by `tibco-cp-base` 1.19.0+ when `dnsDomain == dnsTunnelDomain`):
 
 ```yaml
 spec:
   hostnames:
-  - "${CP_INSTANCE_ID}-tunnel.${TP_BASE_DNS_DOMAIN}"
+  - "*.${TP_BASE_DNS_DOMAIN}"
   rules:
   - matches:
     - path:
@@ -1805,14 +1787,9 @@ spec:
     backendRefs:
     - name: hybrid-proxy
       port: 105
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
-    - name: hybrid-proxy
-      port: 105
 ```
+
+If you still see a second `PathPrefix: /` rule, `dnsDomain` and `dnsTunnelDomain` differ in the deployed values.
 
 ---
 
@@ -2102,8 +2079,9 @@ cat > aws-tibco-cp-base-legacy-gateway-api.yaml <(envsubst \
 # hybrid-proxy   → *.${TP_TUNNEL_DOMAIN}  (HTTPRoute)
 # router-operator → *.${TP_MY_DOMAIN}      (HTTPRoute)
 #
-# In 1.18, the chart only generates PathPrefix:/ for hybrid-proxy (PCP-21362).
-# PathPrefix:/infra/tunnel is missing — must be added explicitly in rules below.
+# Because dnsDomain != dnsTunnelDomain, tibco-cp-base 1.19.0+ renders both
+# PathPrefix:/infra/tunnel and PathPrefix:/ for hybrid-proxy automatically.
+# The chart does not read gatewayRoute.rules — do not add explicit rules.
 #
 # Two wildcard ACM certificates required: *.${TP_MY_DOMAIN} and *.${TP_TUNNEL_DOMAIN}.
 # =============================================================================
@@ -2119,24 +2097,9 @@ hybrid-proxy:
     parentRefs:
     - name: "${TP_GATEWAY_NAME}"
       namespace: "${TP_GATEWAY_NAMESPACE}"
-    rules:
-    - matches:
-      - path:
-          type: PathPrefix
-          value: /infra/tunnel
-      backendRefs:
-      - name: hybrid-proxy
-        port: 105
-    - matches:
-      - path:
-          type: PathPrefix
-          value: /
-      backendRefs:
-      - name: hybrid-proxy
-        port: 105
 
 otel-collector:
-  enabled: true
+  enabled: true         # set explicitly: chart default is false in 1.20.0 (true in 1.19.0); requires logserver below
 
 router-operator:
   tscSessionKey:
@@ -2227,14 +2190,14 @@ EOF
 )
 ```
 
-Verify the HTTPRoute has both explicit path rules:
+Verify the HTTPRoutes rendered by the chart:
 
 ```bash
 kubectl get httproute -n ${CP_INSTANCE_ID}-ns
 kubectl describe httproute -n ${CP_INSTANCE_ID}-ns
 ```
 
-Expected `hybrid-proxy` HTTPRoute (from the explicit values above):
+Expected `hybrid-proxy` HTTPRoute (rendered by `tibco-cp-base` 1.19.0+ when `dnsDomain != dnsTunnelDomain`):
 
 ```yaml
 spec:
@@ -2427,7 +2390,7 @@ kubectl run ssl-test --rm -it --restart=Never \
 helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
   --labels layer=1 \
-  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.20.0" \
   -f ${CP_VALUES_FILE}
 ```
 
@@ -2446,7 +2409,7 @@ kubectl get pods -n ${CP_INSTANCE_ID}-ns
 4. Configure the email server from the Platform Console if you need SES, SMTP, SendGrid, or Microsoft Graph notifications
 5. Create a subscription with your chosen `hostPrefix` (e.g., `dev`) to access the subscription portal
 
-Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
+Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
 
 ---
 
@@ -2555,7 +2518,7 @@ kubectl get ingress -n ingress-system nginx | awk 'NR==2 { print $3 }'
 | Ingress class name | `nginx` | Used for BWCE capability Ingress objects |
 | EFS storage class | `efs-sc` | Used for BWCE artifact manager and EMS logs |
 | EBS storage class | `ebs-gp3` | Used for EMS capability data |
-| Network Policy Details | [DP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/controlling-traffic-with-network-policies.htm) | |
+| Network Policy Details | [DP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/controlling-traffic-with-network-policies.htm) | |
 
 ---
 
@@ -2711,9 +2674,9 @@ kubectl get ingress -n prometheus-system kube-prometheus-stack-grafana \
 
 **Why the order matters:** Data Planes must be deleted from the CP UI first (so TIBCO CP can cleanly remove namespace configuration). Then CP is uninstalled. Then AWS resources (EFS, RDS, security groups) are deleted. Finally, the EKS cluster is deleted. Reversing this order can leave orphaned AWS resources or EKS finalizers that block deletion.
 
-1. **Delete TIBCO Control Plane** — follow [TIBCO CP uninstall guide](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#Installation/uninstalling-tibco-control-plane.htm)
+1. **Delete TIBCO Control Plane** — follow [TIBCO CP uninstall guide](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/uninstalling-tibco-control-plane.htm)
 
-2. **Delete TIBCO Data Plane** — delete from CP UI first: [DP deletion guide](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
+2. **Delete TIBCO Data Plane** — delete from CP UI first: [DP deletion guide](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
 
 3. **Run clean-up scripts:**
 
@@ -2826,13 +2789,13 @@ global:
 ```bash
 # Step 1: Apply the CRDs to the cluster first
 # (extract the chart or reference the crds/ directory from the downloaded .tgz)
-kubectl apply -f /path/to/tibco-cp-base-1.18.0-extracted/crds/
+kubectl apply -f /path/to/tibco-cp-base-1.20.0-extracted/crds/
 
 # Step 2: Install / upgrade with --skip-crds
 helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
   --labels layer=1 \
-  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.18.0" \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.20.0" \
   --skip-crds \
   -f ${CP_VALUES_FILE}
 ```
@@ -2844,7 +2807,7 @@ In an Azure DevOps pipeline, add a dedicated step before the `helm upgrade` step
 kubectl apply -f /azp/_work/1/helm/tibco-cp-base/crds/
 
 # Step 2: Proceed with validation/install using --skip-crds
-helm template tibco-cp-base /azp/_work/1/helm/tibco-cp-base-1.18.0.tgz \
+helm template tibco-cp-base /azp/_work/1/helm/tibco-cp-base-1.20.0.tgz \
   -f /azp/_work/1/s/your-repo/k8s/live/values.yaml \
   --skip-crds
 ```
@@ -2853,7 +2816,7 @@ helm template tibco-cp-base /azp/_work/1/helm/tibco-cp-base-1.18.0.tgz \
 
 ## Additional Resources
 
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm)
 - [tp-helm-charts EKS Workshop](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 - [eksctl Documentation](https://eksctl.io/)
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)

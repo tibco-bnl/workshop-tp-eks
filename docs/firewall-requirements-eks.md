@@ -17,8 +17,8 @@ This document lists all external URLs and endpoints that need to be accessible f
 
 Before configuring your firewall, review the official TIBCO Platform documentation:
 
-- [TIBCO Platform Whitelisting Requirements](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/whitelisting-requirements.htm) — Official Control Plane firewall requirements
-- [Pushing Images to Custom Container Registry](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/pushing-images-to-registry.htm) — Container registry authentication
+- [TIBCO Platform Whitelisting Requirements](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/whitelisting-requirements.htm) — Official Control Plane firewall requirements
+- [Pushing Images to Custom Container Registry](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/pushing-images-to-registry.htm) — Container registry authentication
 - [TIBCO Platform Helm Charts Repository](https://github.com/TIBCOSoftware/tp-helm-charts) — Official Helm charts and deployment guides
 
 ---
@@ -365,7 +365,7 @@ kubectl logs -n kube-system job/tibco-connectivity-test
 
 ## Additional Resources
 
-- [TIBCO Platform Whitelisting Requirements](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm#UserGuide/whitelisting-requirements.htm)
+- [TIBCO Platform Whitelisting Requirements](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/whitelisting-requirements.htm)
 - [AWS EKS Network Requirements](https://docs.aws.amazon.com/eks/latest/userguide/network_reqs.html)
 - [AWS VPC Endpoints](https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints.html)
 - [AWS Network Firewall](https://docs.aws.amazon.com/network-firewall/latest/developerguide/what-is-aws-network-firewall.html)

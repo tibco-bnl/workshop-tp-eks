@@ -29,7 +29,7 @@ This guide covers the official TIBCO synchronization script, safe copy methods f
 
 - [ ] TIBCO JFrog registry credentials (provided by TIBCO): `csgprduswrepoedge.jfrog.io`
 - [ ] AWS IAM credentials with `ecr:GetAuthorizationToken` and push permissions to the target ECR repository
-- [ ] `RELEASE_VERSION` — the TIBCO Platform version being deployed (e.g., `1.18.0`)
+- [ ] `RELEASE_VERSION` — the TIBCO Platform version being deployed (e.g., `1.20.0`)
 
 ### Clone the TIBCO tp-helm-charts Repository
 
@@ -55,7 +55,7 @@ TIBCO provides an official synchronization script at [`scripts/sync-artifacts/sy
 | `SOURCE_REGISTRY` | TIBCO JFrog source registry | `csgprduswrepoedge.jfrog.io` |
 | `SOURCE_REGISTRY_USERNAME` | JFrog username | `john.doe@company.com` |
 | `SOURCE_REGISTRY_PASSWORD` | JFrog password or API token | `AKCp8...` |
-| `RELEASE_VERSION` | Platform version (`major.minor.patch`) | `1.18.0` |
+| `RELEASE_VERSION` | Platform version (`major.minor.patch`) | `1.20.0` |
 | `TARGET_REGISTRY` | Your ECR registry URL | `123456789012.dkr.ecr.us-east-1.amazonaws.com` |
 
 ### Optional Environment Variables
@@ -79,7 +79,7 @@ ECR_TOKEN=$(aws ecr get-login-password --region us-east-1)
 export SOURCE_REGISTRY="csgprduswrepoedge.jfrog.io"
 export SOURCE_REGISTRY_USERNAME="john.doe@company.com"
 export SOURCE_REGISTRY_PASSWORD="AKCp8mnyYZQ..."
-export RELEASE_VERSION="1.18.0"
+export RELEASE_VERSION="1.20.0"
 export TARGET_REGISTRY="123456789012.dkr.ecr.us-east-1.amazonaws.com"
 export TARGET_REGISTRY_USERNAME="AWS"
 export TARGET_REGISTRY_PASSWORD="$ECR_TOKEN"

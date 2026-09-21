@@ -2,9 +2,9 @@
 
 This repository contains workshop guides for deploying TIBCO Platform on Amazon Elastic Kubernetes Service (EKS). It covers full Control Plane plus Data Plane deployments, Data Plane-only deployments, DNS, storage, observability, prerequisites, and optional Azure DevOps automation.
 
-> **Current release:** [v1.18.0](./releases/v1.18.0)
-> **TIBCO Platform Control Plane:** 1.18.0
-> **Upgrading from 1.17.0?** Start with the [v1.18.0 release notes](./releases/v1.18.0#upgrade-path-from-v1170).
+> **Current release:** [v1.20.0](./releases/v1.20.0)
+> **TIBCO Platform Control Plane:** 1.20.0
+> **Upgrading from 1.18.0?** Upgrade to 1.19.0 first ([v1.19.0 release notes](./releases/v1.19.0#upgrade-path-from-v1180)), then to 1.20.0 ([v1.20.0 release notes](./releases/v1.20.0#upgrade-path-from-v1190)).
 
 > **Workshop scope:** These guides are for evaluation, development, demos, and workshops. For production deployments, work with TIBCO Support, TIBCO SI Partners, or your TIBCO account team and follow the official TIBCO Platform documentation.
 
@@ -14,7 +14,8 @@ This repository contains workshop guides for deploying TIBCO Platform on Amazon 
 |------|---------------|
 | Plan CP/DP topology, DTAP, and subscription strategy | [Topology options](./howto/topology-options) |
 | Deploy Control Plane and Data Plane on one EKS cluster | [CP + DP setup guide](./howto/how-to-cp-and-dp-eks-setup-guide) |
-| Apply 1.18-specific install or upgrade notes | [v1.18 overlay](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide) |
+| Apply 1.20-specific install or upgrade notes | [v1.20 overlay](./howto/v1.20/how-to-cp-and-dp-eks-setup-guide) |
+| Pass through 1.19 when upgrading from 1.18 | [v1.19 overlay](./howto/v1.19/how-to-cp-and-dp-eks-setup-guide) |
 | Connect an EKS Data Plane to an existing Control Plane | [Data Plane-only guide](./howto/how-to-dp-eks-setup-guide) |
 | Configure Route 53 and DNS records | [Route 53 DNS guide](./howto/how-to-add-dns-records-eks-aws) |
 | Install logs, metrics, traces, and dashboards | [Data Plane observability guide](./howto/how-to-dp-eks-observability) |
@@ -23,32 +24,45 @@ This repository contains workshop guides for deploying TIBCO Platform on Amazon 
 
 ## Current Release Highlights
 
-TIBCO Platform 1.18.0 on EKS keeps the 1.17 simplified DNS model and adds these operator-facing updates:
+TIBCO Platform 1.20.0 on EKS keeps the simplified DNS model and Console-managed email from earlier releases. Together with the intermediate 1.19.0 release it brings these operator-facing changes:
 
-- **Simplified DNS continues:** use one Route 53 base domain and one ACM wildcard certificate for admin, subscription, and tunnel traffic.
-- **Console-managed email:** configure SES, SMTP, SendGrid, or Microsoft Graph in Platform Console. Do not put deprecated email provider settings in `tibco-cp-base` Helm values.
-- **Gateway API evaluation path:** NGINX Gateway Fabric, Traefik, Istio, and NetScaler Gateway API controllers can be evaluated where CP, DP, and capability routes support Gateway API resources.
-- **Namespace-level RBAC:** Application Manager and Application Viewer access can be scoped by Data Plane namespace.
-- **Alert Audit Trail:** alert health and rule-performance events are available in the UI.
-- **Aurora PostgreSQL SSL guidance:** use `require` or `verify-full` when `rds.force_ssl=1` is enforced.
+- **Chart values:** `global.tibco.networkPolicy.createDeprecatedPolicies` was removed in 1.19.0; `global.tibco.disabledInfraCapabilities` (default `[MFTADAPTER]`) is new in 1.20.0; the `otel-collector.enabled` chart default is `false` in 1.20.0, so set it explicitly.
+- **Gateway API:** since `tibco-cp-base` 1.19.0 the `hybrid-proxy` HTTPRoute renders `/infra/tunnel` itself, so simplified DNS works with one shared wildcard hostname (PCP-21362 fixed).
+- **Control Plane rollback:** 1.20.0 supports `helm rollback` to the previous release, including the database schema when `manageDbSchema` is `true`.
+- **Observability:** Jaeger v2 (chart 4.8.x), OpenTelemetry Collector 0.156.2, PromQL cards, and OTLP exporters with custom headers.
+- **Aurora PostgreSQL:** the upstream workshop now creates the cluster parameter group with the AWS CLI and references it via `dbClusterParameterGroupName`; keep `TP_DB_SSL_MODE=require` or `verify-full`.
+- **AI and MCP:** TESSA, Infra MCP Server, and MCP Hub with MCP Gateway arrive in 1.19.0 and 1.20.0. TESSA and MCP Hub are TIBCO Operated Control Plane only; the Infra MCP Server can be provisioned on EKS Data Planes.
+- **Capabilities:** ActiveSpaces capability (1.19.0), Flogo build Jobs and app-init resources, Developer Hub on Backstage 1.51.0 with MCP server and MCP Catalog. No 1.20.0 messaging charts were published; EMS stays at 1.19.23.
 
-For details, see the [v1.18.0 release notes](./releases/v1.18.0), [v1.18 quick reference](./howto/v1.18/QUICK-REFERENCE), and [v1.18 documentation summary](./howto/v1.18/DOCUMENTATION-SUMMARY).
+For details, see the [v1.20.0 release notes](./releases/v1.20.0), [v1.20 quick reference](./howto/v1.20/QUICK-REFERENCE), and [v1.20 documentation summary](./howto/v1.20/DOCUMENTATION-SUMMARY).
 
 ## Release Matrix
 
 | Version | Status | Where to start |
 |---------|--------|----------------|
-| 1.18.0 | Current, recommended for new deployments | [Release notes](./releases/v1.18.0), [v1.18 overlay](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide) |
-| 1.17.0 | Previous release | [Release notes](./releases/v1.17.0), [v1.17 quick reference](./howto/v1.17/QUICK-REFERENCE) |
+| 1.20.0 | Current, recommended for new deployments | [Release notes](./releases/v1.20.0), [v1.20 overlay](./howto/v1.20/how-to-cp-and-dp-eks-setup-guide) |
+| 1.19.0 | Previous release, mandatory hop from 1.18.0 | [Release notes](./releases/v1.19.0), [v1.19 overlay](./howto/v1.19/how-to-cp-and-dp-eks-setup-guide) |
+| 1.18.0 | Older reference | [Release notes](./releases/v1.18.0), [v1.18 overlay](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide) |
+| 1.17.0 | Older reference | [Release notes](./releases/v1.17.0), [v1.17 quick reference](./howto/v1.17/QUICK-REFERENCE) |
 | 1.16.0 | Older reference | [Release notes](./releases/v1.16.0) |
+
+## Upgrade Paths
+
+| From | To | Guide |
+|------|----|-------|
+| 1.19.0 | 1.20.0 | [Upgrade path](./releases/v1.20.0#upgrade-path-from-v1190) |
+| 1.18.0 | 1.19.0 | [Upgrade path](./releases/v1.19.0#upgrade-path-from-v1180) |
+| 1.17.0 | 1.18.0 | [Upgrade path](./releases/v1.18.0#upgrade-path-from-v1170) |
+
+The official upgrade assistants in `tp-helm-charts/scripts/<version>/upgrade.sh` move one minor version at a time; use `scripts/MASTER-UPGRADE-README.md` for multi-hop upgrades.
 
 ## Deployment Paths
 
 ### Full Platform on EKS
 
-Use this path for workshops, evaluations, demos, and standalone development environments. It deploys TIBCO Platform Control Plane and Data Plane into the same EKS cluster with Aurora PostgreSQL, EFS, EBS gp3, Route 53, ACM, ALB, and Nginx or Traefik.
+Use this path for workshops, evaluations, demos, and standalone development environments. It deploys TIBCO Platform Control Plane and Data Plane into the same EKS cluster with Aurora PostgreSQL, EFS, EBS gp3, Route 53, ACM, ALB, and Traefik (or optionally Gateway API).
 
-Start with the [CP + DP setup guide](./howto/how-to-cp-and-dp-eks-setup-guide), then apply the [v1.18 overlay](./howto/v1.18/how-to-cp-and-dp-eks-setup-guide) for current-release changes.
+Start with the [CP + DP setup guide](./howto/how-to-cp-and-dp-eks-setup-guide), then apply the [v1.20 overlay](./howto/v1.20/how-to-cp-and-dp-eks-setup-guide) for current-release changes.
 
 ### EKS Data Plane Only
 
@@ -64,14 +78,14 @@ Start with the [Data Plane observability guide](./howto/how-to-dp-eks-observabil
 
 ## Required Tools
 
-Install and configure these before starting:
+Install and configure these before starting (versions follow the upstream `tp-helm-charts` EKS workshop for 1.20.0):
 
 | Tool | Recommended version |
 |------|---------------------|
-| AWS CLI | 2.27.0+ |
+| AWS CLI | 2.27.31+ |
 | eksctl | 0.210.0+ |
-| kubectl | Latest stable |
-| Helm | 3.13.0+ |
+| kubectl | v1.34.3+ |
+| Helm | 3.17.0+ (3.18.0 tested upstream) |
 | jq | 1.8.0+ |
 | yq | 4.45.4+ |
 | envsubst | gettext 0.24.1+ |
@@ -82,12 +96,12 @@ You also need AWS permissions for EKS, IAM, EC2/VPC, Route 53, ACM, EFS, EBS, an
 
 | Area | Baseline |
 |------|----------|
-| Kubernetes | EKS 1.33+ |
+| Kubernetes | EKS 1.33+ (highest certified for Control Plane 1.20.0: EKS 1.35) |
 | Worker nodes | 3+ `m5a.xlarge` or larger for CP + DP workshops |
-| Database | Amazon Aurora PostgreSQL 16 recommended |
+| Database | Amazon Aurora PostgreSQL 16 with `rds.force_ssl=1` |
 | Storage | Amazon EFS for shared files, Amazon EBS gp3 for block storage |
 | DNS and TLS | Route 53 hosted zone and ACM wildcard certificate |
-| Ingress and Gateway API | AWS ALB with Nginx or Traefik for the baseline; optional Gateway API evaluation with NGINX Gateway Fabric, Traefik, Istio, or NetScaler |
+| Ingress and Gateway API | AWS ALB with Traefik 3.3.4 for the baseline (NGINX Ingress Controller support is removed); optional Gateway API with NGINX Gateway Fabric 2.3.0, Traefik `traefik-39.0.7`, Istio 1.28.2, or NetScaler |
 | AWS identity | IAM Roles for Service Accounts (IRSA) |
 
 ## Repository Map
@@ -102,14 +116,17 @@ workshop-tp-eks/
 |   |-- how-to-add-dns-records-eks-aws.md
 |   |-- how-to-sync-images.md
 |   |-- prerequisites-checklist-for-customer.md
-|   `-- v1.18/
-|       |-- how-to-cp-and-dp-eks-setup-guide.md
-|       |-- QUICK-REFERENCE.md
-|       `-- DOCUMENTATION-SUMMARY.md
+|   |-- v1.20/                      # current release overlay
+|   |   |-- how-to-cp-and-dp-eks-setup-guide.md
+|   |   |-- QUICK-REFERENCE.md
+|   |   `-- DOCUMENTATION-SUMMARY.md
+|   |-- v1.19/                      # upgrade hop from 1.18
+|   |-- v1.18/
+|   `-- v1.17/
 |-- docs/
 |   `-- firewall-requirements-eks.md
 |-- pipelines/azure-devops/
-|-- releases/
+|-- releases/                       # v1.16.0 ... v1.20.0
 `-- scripts/env.sh
 ```
 
@@ -120,7 +137,7 @@ The [Azure DevOps pipeline folder](https://github.com/tibco-bnl/workshop-tp-eks/
 | Pipeline | Purpose |
 |----------|---------|
 | [test-postgres-connectivity.yml](./pipelines/azure-devops/test-postgres-connectivity.yml) | Validate Aurora PostgreSQL connectivity from inside EKS before deploying Control Plane |
-| [deploy-tibco-control-plane.yml](./pipelines/azure-devops/deploy-tibco-control-plane.yml) | Create prerequisites, generate `tibco-cp-base` values, deploy Control Plane, and verify access |
+| [deploy-tibco-control-plane.yml](./pipelines/azure-devops/deploy-tibco-control-plane.yml) | Create prerequisites, generate `tibco-cp-base` values, deploy Control Plane (default chart 1.20.0), and verify access |
 | [check-namespace-health.yml](./pipelines/azure-devops/check-namespace-health.yml) | Scheduled or manual CP/DP namespace diagnostics for pods, PVCs, events, ingresses, secrets, and node pressure |
 
 All pipelines expect an Azure DevOps variable group named `tibco-platform-eks-secrets`; production use should link it to Azure Key Vault.
@@ -137,7 +154,7 @@ export TP_CONTAINER_REGISTRY_USER="my-jfrog-user"
 export TP_CONTAINER_REGISTRY_PASSWORD="my-jfrog-token"
 ```
 
-The guide also references upstream AWS helper scripts maintained in the official [tp-helm-charts EKS workshop directory](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks).
+The guide also references upstream AWS helper scripts maintained in the official [tp-helm-charts EKS workshop directory](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks). Release validation can use [scripts/verify-release.sh](https://github.com/TIBCOSoftware/tp-helm-charts/blob/main/scripts/verify-release.sh) from the same repository.
 
 ## Image Synchronization
 
@@ -154,13 +171,16 @@ Start with these checks before raising a support ticket:
 1. Run [check-namespace-health.yml](./pipelines/azure-devops/check-namespace-health.yml) if you use Azure DevOps automation.
 2. Review pod, event, PVC, ingress, and node-pressure findings in the affected namespace.
 3. Verify Route 53 records, ACM certificate ARN, ALB status, EFS/EBS CSI drivers, and Aurora PostgreSQL connectivity.
-4. Compare your generated Helm values with the current guide and [v1.18 quick reference](./howto/v1.18/QUICK-REFERENCE).
+4. Compare your generated Helm values with the current guide and [v1.20 quick reference](./howto/v1.20/QUICK-REFERENCE).
+5. If an upgrade to 1.20.0 fails, use the Control Plane rollback procedure in the [v1.20 overlay](./howto/v1.20/how-to-cp-and-dp-eks-setup-guide#control-plane-rollback).
 
 ## Official References
 
-- [TIBCO Platform Control Plane 1.18.0 Documentation](https://docs.tibco.com/pub/platform-cp/1.18.0/doc/html/Default.htm)
+- [TIBCO Platform Control Plane 1.20.0 Documentation](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm)
+- [TIBCO Platform Control Plane 1.19.0 Documentation](https://docs.tibco.com/pub/platform-cp/1.19.0/doc/html/Default.htm)
 - [TIBCO Helm Charts Repository](https://github.com/TIBCOSoftware/tp-helm-charts)
 - [Official EKS workshop assets in tp-helm-charts](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
+- [Official upgrade scripts (1.19.0, 1.20.0)](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/scripts)
 - [Amazon EKS Documentation](https://docs.aws.amazon.com/eks/)
 - [eksctl Documentation](https://eksctl.io/)
 
@@ -174,4 +194,4 @@ Start with these checks before raising a support ticket:
 This project is licensed under the Apache License 2.0. See [LICENSE](https://github.com/tibco-bnl/workshop-tp-eks/blob/main/LICENSE) for details.
 
 **Maintained by:** TIBCO-BNL Team
-**Last updated:** June 11, 2026
+**Last updated:** September 21, 2026
