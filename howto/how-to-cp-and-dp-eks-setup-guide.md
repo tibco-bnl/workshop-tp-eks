@@ -13,21 +13,17 @@ title: TIBCO Platform Control Plane and Data Plane Setup on EKS
 
 **Estimated Time**: 4-6 hours (first-time installation)
 
-**Last Updated**: September 21, 2026 (v1.20.0)
+**Last Updated**: 2026-10-12 (v1.21.0)
 
 > **Note:** This workshop is NOT meant for production deployment.
 
-> **Version note:** This is the shared EKS CP+DP baseline guide. It includes the 1.17.0 simplified DNS updates and the current 1.20.0 Control Plane guidance. For release-specific overlays, start with [v1.20](./v1.20/how-to-cp-and-dp-eks-setup-guide); the [v1.19 overlay](./v1.19/how-to-cp-and-dp-eks-setup-guide) is the mandatory upgrade hop from 1.18.0, and [v1.18](./v1.18/how-to-cp-and-dp-eks-setup-guide) is kept for reference.
+> **Version note:** This shared EKS CP+DP baseline targets Control Plane 1.21.0. See the [1.21 quick reference](./v1.21/QUICK-REFERENCE) and [release notes](../releases/v1.21.0). Release overlays remain available for historical installations.
 
-> **Version 1.20.0 Update**: Key changes from 1.18.0 (details in the [v1.19.0](../releases/v1.19.0) and [v1.20.0](../releases/v1.20.0) release notes):
-> - `tibco-cp-base` chart pinned to 1.20.0; `dp-configure-namespace` 1.20.0 and `dp-core-infrastructure` 1.20.3
-> - `global.tibco.networkPolicy.createDeprecatedPolicies` was removed in 1.19.0; delete it from existing values files
-> - `otel-collector.enabled` chart default is `false` in 1.20.0 (it was `true` in 1.19.0); this guide sets it explicitly
-> - New `global.tibco.disabledInfraCapabilities` value in 1.20.0 (chart default `[MFTADAPTER]`)
-> - Gateway API: since 1.19.0 the `hybrid-proxy` HTTPRoute renders `/infra/tunnel` itself, so simplified DNS no longer needs hostname separation (PCP-21362 fixed)
-> - Control Plane rollback is supported from 1.20.0 (`helm rollback`); record `helm history` before upgrading
-> - Upstream EKS workshop now creates the Aurora cluster parameter group with the AWS CLI (`dbClusterParameterGroupName`) and keeps `rds.force_ssl=1`
-> - Email server configuration stays in the TIBCO Platform Console (since 1.18.0); simplified DNS remains recommended
+> **Version 1.21.0 Update**: `tibco-cp-base` is 1.21.0; `dp-configure-namespace` and `dp-core-infrastructure` are both 1.21.4. Chart versions are not necessarily aligned: Messaging and Hawk are 1.21.23.
+> - 1.21 adds per-Data-Plane hybrid connectivity/controller selection and Kubernetes Secret authentication for custom registries. Prefer the Control Plane-generated Data Plane commands.
+> - The 1.21 upgrade assistant upgrades Control Plane only; upgrade capability charts and Data Plane infrastructure/capabilities separately.
+> - The 1.21 assistant checks deployed `app_version` 1.20.0 and documents no 1.21-specific values transformations.
+> - Continue to follow EKS-specific prerequisites for Aurora PostgreSQL, EFS/EBS, IAM, and cluster-version availability; do not infer EKS support solely from Kubernetes 1.35 certification.
 
 ---
 
@@ -135,7 +131,7 @@ The complete list of variables used in this guide, organized by purpose. All are
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
-| `TP_CONTAINER_REGISTRY_URL` | `csgprduswrepoedge.jfrog.io` | TIBCO JFrog registry URL |
+| `TP_CONTAINER_REGISTRY_URL` | `csgprdusw2reposaas.jfrog.io` | TIBCO JFrog registry URL |
 | `TP_CONTAINER_REGISTRY_USER` | _(empty)_ | JFrog username |
 | `TP_CONTAINER_REGISTRY_PASSWORD` | _(empty)_ | JFrog password/API key |
 
@@ -157,7 +153,7 @@ The complete list of variables used in this guide, organized by purpose. All are
 
 **Email (configure after deploying tibco-cp-base; Console-managed since 1.18.0)**
 
-Since TIBCO Platform 1.18.0 (current release 1.20.0), email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 or later Helm values file. The only remaining email-related value in `tibco-cp-base` is `global.tibco.networkPolicy.emailServer`, which is optional egress NetworkPolicy configuration and is not an email provider configuration.
+Since TIBCO Platform 1.18.0, email server settings are configured from the TIBCO Platform Console after installation or upgrade. The variables below are retained for 1.17.x compatibility and for recording the values you will enter in the Console; do not include the old `global.external.emailServer*` values in a 1.18.0 or later Helm values file. The only remaining email-related value in `tibco-cp-base` is `global.tibco.networkPolicy.emailServer`, which is optional egress NetworkPolicy configuration and is not an email provider configuration.
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
@@ -862,7 +858,7 @@ Gateway API is the Kubernetes successor to the older `Ingress` API. Instead of a
 - `Gateway` represents the listener and load-balancer entry point.
 - `HTTPRoute` attaches application routes to a Gateway and points traffic to Kubernetes services.
 
-The official TIBCO Platform requirements list Gateway API controller support for both Control Plane and data plane usage. For TIBCO Platform 1.20.0 (unchanged since 1.18.0), supported Gateway API controllers include NGINX Gateway Fabric 2.3.0, Istio 1.28.2, Traefik `traefik-39.0.7`, NetScaler `netscaler-cpx-with-gateway-controller-2.0.0`, and the `Other Gateway API Controller` option for data plane controllers that are not listed explicitly.
+The official TIBCO Platform requirements list Gateway API controller support for both Control Plane and Data Plane usage. For supported controller versions, consult the 1.21.0 system requirements; these versions can differ from those installed by this workshop. Data Plane registration can also accept a customer-provided Gateway API controller when supported by the selected Data Plane type.
 
 For this EKS workshop, keep the default ALB plus Nginx or Traefik ingress path unless you are intentionally validating Gateway API. Gateway API changes the Kubernetes resources created for endpoint exposure, but it does not remove the need for DNS, certificates, network policies, storage, PostgreSQL, or the TIBCO container registry.
 
@@ -1149,7 +1145,7 @@ kubectl get ingressclass
 | EFS storage class | `efs-sc` | Used for CP persistent storage |
 | RDS DB instance ARN (CLI) | `arn:aws:rds:<region>:<account>:db:${TP_CLUSTER_NAME}-db` | Connection details |
 | RDS details (Crossplane) | Secret `${CP_INSTANCE_ID}-aurora-details` in `${CP_INSTANCE_ID}-ns` | |
-| Network Policies | [CP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/control-plane-network-policies.htm) | |
+| Network Policies | [CP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/control-plane-network-policies.htm) | |
 
 ### Create Namespace and Service Account (CLI method only)
 
@@ -1175,7 +1171,7 @@ kubectl create serviceaccount ${CP_INSTANCE_ID}-sa -n ${CP_INSTANCE_ID}-ns
 
 **Why:** The TIBCO Control Plane router pods use these cryptographic keys to sign and verify user session tokens. `TSC_SESSION_KEY` signs tokens for the TSC (TIBCO Subscription Console) domain. `DOMAIN_SESSION_KEY` signs tokens for custom domain routing. Without this secret, the router pods crash on startup with a missing secret error. The keys must remain stable across upgrades — if they change, all active user sessions are immediately invalidated.
 
-Reference: [TIBCO CP secret requirements](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
+Reference: [TIBCO CP secret requirements](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
 
 ```bash
 export TSC_SESSION_KEY=$(openssl rand -base64 48 | tr -dc A-Za-z0-9 | head -c32)
@@ -1320,7 +1316,7 @@ export TP_ADMIN_INITIAL_PASSWORD="ChangeMeNow!1"   # Must be changed after first
 
 ### Generate tibco-cp-base Values File
 
-**Why:** The `tibco-cp-base` chart (v1.20.0) is the main TIBCO Control Plane Helm chart. It deploys the router, orchestrator, hybrid proxy, and all CP microservices. Generating a named file (rather than passing all values inline) keeps the configuration auditable and re-usable across upgrades.
+**Why:** The `tibco-cp-base` chart (v1.21.0) is the main TIBCO Control Plane Helm chart. It deploys the router, orchestrator, hybrid proxy, and all CP microservices. Generating a named file (rather than passing all values inline) keeps the configuration auditable and re-usable across upgrades.
 
 > **Source:** [`tp-helm-charts/charts/tibco-cp-base/values.yaml`](https://github.com/TIBCOSoftware/tp-helm-charts/blob/main/charts/tibco-cp-base/values.yaml)
 
@@ -1414,7 +1410,7 @@ global:
       url: "${TP_CONTAINER_REGISTRY_URL}"
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
-      repository: "tibco-platform-docker-prod"
+      repository: "tibco-platform-docker-dev"
     imagePullSecrets:
       - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
@@ -1549,7 +1545,7 @@ global:
       url: "${TP_CONTAINER_REGISTRY_URL}"
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
-      repository: "tibco-platform-docker-prod"
+      repository: "tibco-platform-docker-dev"
     imagePullSecrets:
       - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
@@ -1669,7 +1665,7 @@ hybrid-proxy:
       namespace: "${TP_GATEWAY_NAMESPACE}"
 
 otel-collector:
-  enabled: true         # set explicitly: chart default is false in 1.20.0 (true in 1.19.0); requires logserver below
+  enabled: true         # set explicitly; requires a reachable Elasticsearch/OpenSearch log server
 
 router-operator:
   tscSessionKey:
@@ -1700,7 +1696,7 @@ global:
       url: "${TP_CONTAINER_REGISTRY_URL}"
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
-      repository: "tibco-platform-docker-prod"
+      repository: "tibco-platform-docker-dev"
     imagePullSecrets:
       - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
@@ -1866,7 +1862,7 @@ global:
       url: "${TP_CONTAINER_REGISTRY_URL}"
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
-      repository: "tibco-platform-docker-prod"
+      repository: "tibco-platform-docker-dev"
     imagePullSecrets:
       - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
@@ -1990,7 +1986,7 @@ global:
       url: "${TP_CONTAINER_REGISTRY_URL}"
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
-      repository: "tibco-platform-docker-prod"
+      repository: "tibco-platform-docker-dev"
     imagePullSecrets:
       - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
@@ -2099,7 +2095,7 @@ hybrid-proxy:
       namespace: "${TP_GATEWAY_NAMESPACE}"
 
 otel-collector:
-  enabled: true         # set explicitly: chart default is false in 1.20.0 (true in 1.19.0); requires logserver below
+  enabled: true         # set explicitly; requires a reachable Elasticsearch/OpenSearch log server
 
 router-operator:
   tscSessionKey:
@@ -2127,7 +2123,7 @@ global:
       url: "${TP_CONTAINER_REGISTRY_URL}"
       username: "${TP_CONTAINER_REGISTRY_USER}"
       password: "${TP_CONTAINER_REGISTRY_PASSWORD}"
-      repository: "tibco-platform-docker-prod"
+      repository: "tibco-platform-docker-dev"
     imagePullSecrets:
       - name: tibco-container-registry-credentials
     createNetworkPolicy: ${TP_ENABLE_NETWORK_POLICY}
@@ -2390,7 +2386,7 @@ kubectl run ssl-test --rm -it --restart=Never \
 helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
   --labels layer=1 \
-  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.20.0" \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.21.0" \
   -f ${CP_VALUES_FILE}
 ```
 
@@ -2409,7 +2405,7 @@ kubectl get pods -n ${CP_INSTANCE_ID}-ns
 4. Configure the email server from the Platform Console if you need SES, SMTP, SendGrid, or Microsoft Graph notifications
 5. Create a subscription with your chosen `hostPrefix` (e.g., `dev`) to access the subscription portal
 
-Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
+Reference: [Deploying Control Plane in Kubernetes](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm)
 
 ---
 
@@ -2518,7 +2514,7 @@ kubectl get ingress -n ingress-system nginx | awk 'NR==2 { print $3 }'
 | Ingress class name | `nginx` | Used for BWCE capability Ingress objects |
 | EFS storage class | `efs-sc` | Used for BWCE artifact manager and EMS logs |
 | EBS storage class | `ebs-gp3` | Used for EMS capability data |
-| Network Policy Details | [DP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/controlling-traffic-with-network-policies.htm) | |
+| Network Policy Details | [DP Network Policy Docs](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/controlling-traffic-with-network-policies.htm) | |
 
 ---
 
@@ -2674,7 +2670,7 @@ kubectl get ingress -n prometheus-system kube-prometheus-stack-grafana \
 
 **Why the order matters:** Data Planes must be deleted from the CP UI first (so TIBCO CP can cleanly remove namespace configuration). Then CP is uninstalled. Then AWS resources (EFS, RDS, security groups) are deleted. Finally, the EKS cluster is deleted. Reversing this order can leave orphaned AWS resources or EKS finalizers that block deletion.
 
-1. **Delete TIBCO Control Plane** — follow [TIBCO CP uninstall guide](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/uninstalling-tibco-control-plane.htm)
+1. **Delete TIBCO Control Plane** — follow [TIBCO CP uninstall guide](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/uninstalling-tibco-control-plane.htm)
 
 2. **Delete TIBCO Data Plane** — delete from CP UI first: [DP deletion guide](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
 
@@ -2789,13 +2785,13 @@ global:
 ```bash
 # Step 1: Apply the CRDs to the cluster first
 # (extract the chart or reference the crds/ directory from the downloaded .tgz)
-kubectl apply -f /path/to/tibco-cp-base-1.20.0-extracted/crds/
+kubectl apply -f /path/to/tibco-cp-base-1.21.0-extracted/crds/
 
 # Step 2: Install / upgrade with --skip-crds
 helm upgrade --install --wait --timeout 1h --create-namespace \
   -n ${CP_INSTANCE_ID}-ns tibco-cp-base tibco-cp-base \
   --labels layer=1 \
-  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.20.0" \
+  --repo "${TP_TIBCO_HELM_CHART_REPO}" --version "1.21.0" \
   --skip-crds \
   -f ${CP_VALUES_FILE}
 ```
@@ -2807,7 +2803,7 @@ In an Azure DevOps pipeline, add a dedicated step before the `helm upgrade` step
 kubectl apply -f /azp/_work/1/helm/tibco-cp-base/crds/
 
 # Step 2: Proceed with validation/install using --skip-crds
-helm template tibco-cp-base /azp/_work/1/helm/tibco-cp-base-1.20.0.tgz \
+helm template tibco-cp-base /azp/_work/1/helm/tibco-cp-base-1.21.0.tgz \
   -f /azp/_work/1/s/your-repo/k8s/live/values.yaml \
   --skip-crds
 ```
@@ -2816,7 +2812,7 @@ helm template tibco-cp-base /azp/_work/1/helm/tibco-cp-base-1.20.0.tgz \
 
 ## Additional Resources
 
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm)
 - [tp-helm-charts EKS Workshop](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 - [eksctl Documentation](https://eksctl.io/)
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)

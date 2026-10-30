@@ -279,7 +279,7 @@ The following sections (8–10) describe prerequisites specific to TIBCO Platfor
 |-------------|---------|
 | **Helm Repo URL** | `https://tibcosoftware.github.io/tp-helm-charts` |
 | **Add Repository** | `helm repo add tibco-platform https://tibcosoftware.github.io/tp-helm-charts` |
-| **TIBCO CP Base Chart** | `tibco-cp-base` version `1.20.0` |
+| **TIBCO CP Base Chart** | `tibco-cp-base` version `1.21.0` |
 | **dp-config-aws Chart** | `dp-config-aws` version `^1.0.0` |
 
 ---
@@ -553,7 +553,7 @@ Before beginning installation, verify each item:
 
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html)
 - [eksctl Documentation](https://eksctl.io/)
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm)
 - [AWS Certificate Manager Guide](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)
 - [Amazon Route 53 Developer Guide](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html)
 - [Firewall Requirements](../docs/firewall-requirements-eks)

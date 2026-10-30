@@ -27,9 +27,9 @@ This guide covers the official TIBCO synchronization script, safe copy methods f
 
 ### Credentials
 
-- [ ] TIBCO JFrog registry credentials (provided by TIBCO): `csgprduswrepoedge.jfrog.io`
+- [ ] TIBCO JFrog registry credentials for current releases (`csgprdusw2reposaas.jfrog.io`; repository `tibco-platform-docker-dev`)
 - [ ] AWS IAM credentials with `ecr:GetAuthorizationToken` and push permissions to the target ECR repository
-- [ ] `RELEASE_VERSION` — the TIBCO Platform version being deployed (e.g., `1.20.0`)
+- [ ] `RELEASE_VERSION` — the TIBCO Platform version being deployed (current example: `1.21.0`)
 
 ### Clone the TIBCO tp-helm-charts Repository
 
@@ -52,10 +52,11 @@ TIBCO provides an official synchronization script at [`scripts/sync-artifacts/sy
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `SOURCE_REGISTRY` | TIBCO JFrog source registry | `csgprduswrepoedge.jfrog.io` |
+| `SOURCE_REGISTRY` | TIBCO JFrog source registry | `csgprdusw2reposaas.jfrog.io` |
+| `SOURCE_REGISTRY_REPO` | Source repository for current platform images | `tibco-platform-docker-dev` |
 | `SOURCE_REGISTRY_USERNAME` | JFrog username | `john.doe@company.com` |
 | `SOURCE_REGISTRY_PASSWORD` | JFrog password or API token | `AKCp8...` |
-| `RELEASE_VERSION` | Platform version (`major.minor.patch`) | `1.20.0` |
+| `RELEASE_VERSION` | Platform version (`major.minor.patch`) | `1.21.0` |
 | `TARGET_REGISTRY` | Your ECR registry URL | `123456789012.dkr.ecr.us-east-1.amazonaws.com` |
 
 ### Optional Environment Variables
@@ -76,10 +77,11 @@ TIBCO provides an official synchronization script at [`scripts/sync-artifacts/sy
 # Get an ECR auth token
 ECR_TOKEN=$(aws ecr get-login-password --region us-east-1)
 
-export SOURCE_REGISTRY="csgprduswrepoedge.jfrog.io"
+export SOURCE_REGISTRY="csgprdusw2reposaas.jfrog.io"
+export SOURCE_REGISTRY_REPO="tibco-platform-docker-dev"
 export SOURCE_REGISTRY_USERNAME="john.doe@company.com"
 export SOURCE_REGISTRY_PASSWORD="AKCp8mnyYZQ..."
-export RELEASE_VERSION="1.20.0"
+export RELEASE_VERSION="1.21.0"
 export TARGET_REGISTRY="123456789012.dkr.ecr.us-east-1.amazonaws.com"
 export TARGET_REGISTRY_USERNAME="AWS"
 export TARGET_REGISTRY_PASSWORD="$ECR_TOKEN"
@@ -114,6 +116,8 @@ Any of the safe methods below perform registry-to-registry copies that stream ra
 ---
 
 ## Safe Image Copy Methods
+
+> **Registry/version note:** The official 1.21 platform sync uses `csgprdusw2reposaas.jfrog.io/tibco-platform-docker-dev` and the matching 1.21.0 manifests. The static TCI plugin-image examples below refer to legacy plugin artifacts in the older `tibco-platform-docker-prod` repository; do not use those sample tags as the 1.21 platform bill of materials.
 
 ### Method 1 — sync-images.sh (Recommended)
 

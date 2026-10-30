@@ -722,7 +722,7 @@ This value is needed to configure the OpenTelemetry endpoint in Nginx (Part 6) a
 
 Delete the Data Plane from the TIBCO Control Plane UI first to allow the CP to clean up its agent resources:
 
-[Steps to delete Data Plane](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
+[Steps to delete Data Plane](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
 
 Then run the clean-up script:
 
@@ -741,7 +741,7 @@ export TP_DELETE_CLUSTER=false
 
 ## Additional Resources
 
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm)
 - [tp-helm-charts EKS Workshop](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 - [CP + DP Combined Setup Guide](how-to-cp-and-dp-eks-setup-guide)
 - [Observability Guide](how-to-dp-eks-observability)

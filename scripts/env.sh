@@ -36,7 +36,7 @@ export TP_CLUSTER_REGION="${AWS_REGION}"     # Alias used throughout workshop sc
 # Reference: https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html
 
 export TP_CLUSTER_NAME="eks-cluster-${TP_CLUSTER_REGION}"   # EKS cluster name; used in kubeconfig and Helm chart values
-export TP_KUBERNETES_VERSION="1.33"                          # Kubernetes version; use 1.33 or above
+export TP_KUBERNETES_VERSION="1.33"                          # Select an EKS-supported version certified for your TIBCO Platform release
 export TP_NODEGROUP_INSTANCE_TYPE="m5a.xlarge"               # EC2 instance type: 4 vCPU / 16 GB RAM per node
 export TP_NODEGROUP_INITIAL_COUNT=3                          # Number of nodes; 3 provides basic HA across AZs
 export TP_VPC_CIDR="10.180.0.0/16"                          # VPC CIDR for the EKS cluster; must not overlap with other VPCs
@@ -156,7 +156,7 @@ export TP_STORAGE_CLASS="ebs-gp3"           # EBS gp3 storage class name (for EM
 # TIBCO Platform images are hosted on JFrog Artifactory.
 # The registry URL varies by region — use the edge node closest to your cluster.
 # Credentials are provided by TIBCO as part of your platform subscription.
-# Reference: https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/pushing-images-to-registry.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/pushing-images-to-registry.htm
 #
 # Common JFrog edge node URLs by region:
 #   us-west-2:  csgprduswrepoedge.jfrog.io
@@ -176,7 +176,7 @@ export TP_CONTAINER_REGISTRY_PASSWORD=""                        # JFrog password
 # - Max 5 alphanumeric characters
 # - Used as namespace prefix: ${CP_INSTANCE_ID}-ns
 # - Used as service account name: ${CP_INSTANCE_ID}-sa
-# Reference: https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
 
 export CP_INSTANCE_ID="cp1"                  # Unique ID for this CP installation (max 5 alphanumeric chars)
 
@@ -271,7 +271,7 @@ export CP_RESOURCE_PREFIX="platform"         # Prefix for AWS resources created 
 # If you are using the Elastic Stack installed in this workshop, set the endpoint
 # to the Elasticsearch internal service URL after the stack is deployed.
 # Leave empty to disable log forwarding (logging is optional).
-# Reference: https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#UserGuide/observability.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/observability.htm
 
 export TP_LOGSERVER_ENDPOINT=""              # Log server endpoint (e.g., Elasticsearch URL)
 export TP_LOGSERVER_INDEX=""                 # Log index name in the log server
@@ -348,7 +348,7 @@ export TP_DB_SSL_ROOT_CERT_PATH="/etc/ssl/certs/rds-ca-bundle.pem"
 #   - License expiration alerts
 #   - Scheduled report delivery
 #
-# Since TIBCO Platform 1.18.0 (current: 1.20.0), email server settings are configured in the
+# Since TIBCO Platform 1.18.0, email server settings are configured in the
 # Platform Console after installation or upgrade. Keep these variables as a
 # place to record SES/SMTP/SendGrid/Microsoft Graph planning details, but do not pass the deprecated
 # global.external.emailServer* values to tibco-cp-base 1.18.0 or later Helm installs.
@@ -395,7 +395,7 @@ export TP_SENDGRID_API_KEY=""                 # SendGrid API key
 # The initial admin user is created during the first CP deployment.
 # This account is the bootstrap administrator — subsequent users are managed
 # through the CP UI.
-# Reference: https://docs.tibco.com/pub/platform-cp/1.20.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
 
 export TP_ADMIN_EMAIL=""                      # Admin user email address (used as login username)
 export TP_ADMIN_FIRSTNAME=""                  # Admin user first name
