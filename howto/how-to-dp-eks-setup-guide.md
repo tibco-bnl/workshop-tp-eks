@@ -683,9 +683,17 @@ Before registering, retrieve the ALB hostname that Nginx is using. This becomes 
 kubectl get ingress -n ingress-system nginx | awk 'NR==2 { print $3 }'
 ```
 
-### Information Needed for Data Plane Registration
+### 1.21 Data Plane Registration Fields
 
-Collect the following values from the resources you have created. You will enter these in the TIBCO Control Plane UI during the Data Plane registration wizard:
+The 1.21 registration form supports connectivity and route-resource settings per Data Plane. Hybrid connectivity is enabled by default. If you disable it, enter **Reachable DP URL** as the Data Plane `cpdpproxy` service URL (for example, `http://cpdpproxy.<dp-namespace>.svc.cluster.local`) and verify that DNS resolution and network reachability work from the Control Plane. Do not enter the ALB DNS name, application wildcard domain, or Gateway host in this field. Do not assume that `*.svc.cluster.local` resolves across separate EKS clusters.
+
+The route resource is separate from the hybrid tunnel. The 1.21 guide lists NGINX, Traefik, HAProxy, and OpenShift Router as ingress controller types, plus Gateway API controller options. AWS ALB is not listed as an ingress-controller type; do not assume that entering the `alb` ingress class alone makes it a supported route resource. Confirm the type offered by the Control Plane UI and inspect the generated commands before continuing. For the selected route resource, prepare its resource name, controller service DNS, ingress class or Gateway name/namespace, host/FQDN, and any required path prefix or annotations.
+
+The form also includes optional HTTP/HTTPS proxy and `NO_PROXY` settings, custom certificate trust, Fluent Bit service-log processing, container registry authentication, and Helm chart repository selection. Fluent Bit is enabled by default and cannot be changed through registration after the Data Plane is created. For custom registry Secret authentication, create the Secret in all applicable Data Plane namespaces before generating commands. See the [official 1.21 registration guide](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm) and the [EKS 1.21 quick reference](v1.21/QUICK-REFERENCE).
+
+### Environment Information for Registration and Observability
+
+Collect the following values from the resources you have created. Some are used in registration or generated Helm values; others are required when configuring observability after registration. They are not all fields in the registration wizard:
 
 | Name | Sample Value | Where to Find |
 |:-----|:-------------|:--------------|

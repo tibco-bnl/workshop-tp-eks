@@ -31,8 +31,9 @@ Consult all 1.21.0 artifact files for charts not listed here and for the exact i
 
 ## 1.21 operations to account for
 
-- Kubernetes Secret authentication for a custom registry is configured through cluster registration; create the secret in every applicable Data Plane namespace.
-- Hybrid connectivity is configurable per Data Plane. Registration can use an existing ingress or Gateway API controller; inspect the generated commands.
+- In the 1.21 Data Plane registration form, hybrid connectivity is enabled by default. If you disable it, set **Reachable DP URL** to the Data Plane `cpdpproxy` service URL (for example, `http://cpdpproxy.<dp-ns>.svc.cluster.local`) only when that endpoint resolves and is reachable from the Control Plane. It is not the ALB DNS name, application domain, or Gateway host; do not assume cross-cluster `*.svc.cluster.local` DNS works.
+- Select a route resource explicitly supported by the 1.21 form and matching the installed EKS controller. AWS ALB is not listed among the documented ingress-controller types; verify support and inspect the generated commands rather than assuming `alb` is accepted. Review the [official 1.21 registration guide](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm).
+- The form also includes optional proxy, custom-certificate, log-processing, container-registry, and Helm-repository settings. For custom-registry Kubernetes Secret authentication, create the credential Secret in every applicable Data Plane namespace before generating/applying commands.
 - Native Control Tower is Preview for supported Linux x86_64 hosts and does not require Kubernetes.
 - TESSA writes remain disabled until a subscription owner enables them and configures appropriate per-tool guardrails.
 - Maintenance Mode blocks user-initiated writes; it does not stop applications, agents, or internal platform services.

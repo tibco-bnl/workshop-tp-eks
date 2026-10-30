@@ -418,35 +418,17 @@ The following are not required for all deployments but apply in specific custome
 
 > **Version pinning:** Mirror the exact chart versions listed in the setup guide — do not rely on `latest` tags, as charts pulled from a mirrored repo bypass the upstream version resolution.
 
-### 11.2 Non-Well-Known CA Certificates for Data Plane Ingress Registration
+### 11.2 1.21 Data Plane Registration Connectivity and Certificate Trust
 
-**When this applies:** If the Data Plane ingress TLS certificate is signed by an **internal or private Certificate Authority** (not a public CA such as Let's Encrypt, DigiCert, or Comodo), the TIBCO Control Plane cannot trust the Data Plane's HTTPS endpoint without being explicitly told about the CA.
+Hybrid connectivity is enabled by default in the 1.21 Data Plane registration form. Disable it only when the Control Plane can reach the Data Plane directly. When disabled, the **Reachable DP URL** must identify the Data Plane `cpdpproxy` service (for example, `http://cpdpproxy.<dp-namespace>.svc.cluster.local`), and the Control Plane must be able to resolve and reach that endpoint. This is not the ALB DNS name, application hostname, or Gateway host.
 
-**Background:** During Data Plane registration in the Control Plane UI, the provisioner agent installed on the Data Plane cluster must be able to make a verified HTTPS connection back to the Control Plane, and the Control Plane must trust the Data Plane's ingress endpoint to perform health checks and capability provisioning. If the Data Plane ingress certificate chain cannot be verified against a public root CA store, the registration will fail or capabilities will not deploy correctly.
+The 1.21 **Data Plane Certificate** fields describe a different direction of trust: use the Kubernetes Secret name and key when the Data Plane must trust a custom Control Plane certificate. The registration guide does not describe this as a TLS CA-bundle field for making the Control Plane trust a private Data Plane ingress certificate. Do not prepare an ingress CA or rely on AWS ACM based on the older guidance in this checklist; validate any ingress-certificate trust requirement against the current product documentation.
 
-**Registration field:** During Data Plane registration (**Control Plane UI → Settings → Infrastructure → Data Planes → Register Data Plane**), the wizard includes a **TLS Certificate / CA Bundle** field. This field is required when the Data Plane ingress uses a non-public CA certificate.
+- [ ] Decide whether hybrid connectivity remains enabled or whether the Control Plane has verified direct access to the Data Plane.
+- [ ] If disabling hybrid connectivity, record and test the Data Plane `cpdpproxy` URL from the Control Plane network.
+- [ ] If the Control Plane uses a custom certificate, identify the certificate Secret name and key that the Data Plane must trust.
 
-**What to prepare:**
-
-| Certificate Type | CA Cert Required? | What to Provide |
-|------------------|-------------------|-----------------|
-| Public CA (Let's Encrypt, DigiCert, etc.) | No | Nothing extra needed |
-| Internal PKI / Corporate CA | **Yes** | PEM-encoded CA certificate from your internal PKI chain |
-| Self-signed certificate | **Yes** | The self-signed certificate itself (it is its own CA) |
-| AWS ACM (for ALB-terminated TLS) | No | ACM certs are publicly trusted |
-
-- [ ] Identify whether your Data Plane ingress TLS certificate uses a public or private CA
-- [ ] If private CA: obtain the **PEM-encoded CA certificate** (starts with `-----BEGIN CERTIFICATE-----`)
-  - For internal PKI: get the intermediate or root CA cert from your PKI team
-  - For self-signed: use the self-signed certificate file itself
-- [ ] Confirm the cert is accessible on the installation machine at registration time
-
-> **Reference:** [Registering a Data Plane — TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/latest/doc/html/Default.htm#UserGuide/registering-a-data-plane.htm)
-
-**Impact if omitted when using private CA:**
-- The provisioner agent cannot establish a verified connection to the Control Plane
-- Capability provisioning (BWCE, Flogo, EMS) will fail with TLS errors
-- Data Plane shows as disconnected in the Control Plane UI
+> **Reference:** [Registering a Kubernetes Cluster — TIBCO Platform 1.21](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm)
 
 ### 11.3 PostgreSQL SSL Certificate
 
