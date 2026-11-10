@@ -657,7 +657,7 @@ kubectl get ingress -n prometheus-system kube-prometheus-stack-grafana \
 - [Elastic Cloud on Kubernetes (ECK)](https://www.elastic.co/guide/en/cloud-on-k8s/current/index.html)
 - [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
 - [dp-config-es chart](https://github.com/TIBCOSoftware/tp-helm-charts)
-- [TIBCO Platform Observability Documentation](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/observability.htm)
+- [TIBCO Platform Observability Documentation](https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm#UserGuide/observability.htm)
 - [OpenTelemetry Protocol (OTLP)](https://opentelemetry.io/docs/specs/otel/protocol/)
 - [Kong OpenTelemetry Plugin](https://docs.konghq.com/hub/kong-inc/opentelemetry/)
 - [Data Plane Setup Guide](how-to-dp-eks-setup-guide)

@@ -279,7 +279,7 @@ The following sections (8–10) describe prerequisites specific to TIBCO Platfor
 |-------------|---------|
 | **Helm Repo URL** | `https://tibcosoftware.github.io/tp-helm-charts` |
 | **Add Repository** | `helm repo add tibco-platform https://tibcosoftware.github.io/tp-helm-charts` |
-| **TIBCO CP Base Chart** | `tibco-cp-base` version `1.21.0` |
+| **TIBCO CP Base Chart** | `tibco-cp-base` version `1.22.0` |
 | **dp-config-aws Chart** | `dp-config-aws` version `^1.0.0` |
 
 ---
@@ -418,17 +418,17 @@ The following are not required for all deployments but apply in specific custome
 
 > **Version pinning:** Mirror the exact chart versions listed in the setup guide — do not rely on `latest` tags, as charts pulled from a mirrored repo bypass the upstream version resolution.
 
-### 11.2 1.21 Data Plane Registration Connectivity and Certificate Trust
+### 11.2 Data Plane Registration Connectivity and Certificate Trust (1.21 and later)
 
-Hybrid connectivity is enabled by default in the 1.21 Data Plane registration form. Disable it only when the Control Plane can reach the Data Plane directly. When disabled, the **Reachable DP URL** must identify the Data Plane `cpdpproxy` service (for example, `http://cpdpproxy.<dp-namespace>.svc.cluster.local`), and the Control Plane must be able to resolve and reach that endpoint. This is not the ALB DNS name, application hostname, or Gateway host.
+Hybrid connectivity is enabled by default in the 1.22 Data Plane registration form (unchanged from 1.21). Disable it only when the Control Plane can reach the Data Plane directly. When disabled, the **Reachable DP URL** must identify the Data Plane `cpdpproxy` service (for example, `http://cpdpproxy.<dp-namespace>.svc.cluster.local`), and the Control Plane must be able to resolve and reach that endpoint. This is not the ALB DNS name, application hostname, or Gateway host.
 
-The 1.21 **Data Plane Certificate** fields describe a different direction of trust: use the Kubernetes Secret name and key when the Data Plane must trust a custom Control Plane certificate. The registration guide does not describe this as a TLS CA-bundle field for making the Control Plane trust a private Data Plane ingress certificate. Do not prepare an ingress CA or rely on AWS ACM based on the older guidance in this checklist; validate any ingress-certificate trust requirement against the current product documentation.
+The **Data Plane Certificate** fields describe a different direction of trust: use the Kubernetes Secret name and key when the Data Plane must trust a custom Control Plane certificate. The registration guide does not describe this as a TLS CA-bundle field for making the Control Plane trust a private Data Plane ingress certificate. Do not prepare an ingress CA or rely on AWS ACM based on the older guidance in this checklist; validate any ingress-certificate trust requirement against the current product documentation.
 
 - [ ] Decide whether hybrid connectivity remains enabled or whether the Control Plane has verified direct access to the Data Plane.
 - [ ] If disabling hybrid connectivity, record and test the Data Plane `cpdpproxy` URL from the Control Plane network.
 - [ ] If the Control Plane uses a custom certificate, identify the certificate Secret name and key that the Data Plane must trust.
 
-> **Reference:** [Registering a Kubernetes Cluster — TIBCO Platform 1.21](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm)
+> **Reference:** [Registering a Kubernetes Cluster — TIBCO Platform 1.22](https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm)
 
 ### 11.3 PostgreSQL SSL Certificate
 
@@ -535,7 +535,7 @@ Before beginning installation, verify each item:
 
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/latest/userguide/getting-started.html)
 - [eksctl Documentation](https://eksctl.io/)
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm)
 - [AWS Certificate Manager Guide](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)
 - [Amazon Route 53 Developer Guide](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html)
 - [Firewall Requirements](../docs/firewall-requirements-eks)

@@ -268,7 +268,7 @@ dig *.${TP_DOMAIN}
    - **Load balancer**: Select your ALB from the dropdown
 5. Click **Create records**
 
-Repeat for each wildcard domain needed. For new 1.18 and later deployments (current: 1.20.0), the Control Plane normally needs one simplified wildcard record. Legacy split-domain deployments need separate CP my-domain and tunnel-domain records.
+Repeat for each wildcard domain needed. For new 1.18 and later deployments (current: 1.22.0), the Control Plane normally needs one simplified wildcard record. Legacy split-domain deployments need separate CP my-domain and tunnel-domain records.
 
 ---
 

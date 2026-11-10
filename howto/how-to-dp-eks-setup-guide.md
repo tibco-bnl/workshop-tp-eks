@@ -683,13 +683,13 @@ Before registering, retrieve the ALB hostname that Nginx is using. This becomes 
 kubectl get ingress -n ingress-system nginx | awk 'NR==2 { print $3 }'
 ```
 
-### 1.21 Data Plane Registration Fields
+### Data Plane Registration Fields (1.21 and later)
 
-The 1.21 registration form supports connectivity and route-resource settings per Data Plane. Hybrid connectivity is enabled by default. If you disable it, enter **Reachable DP URL** as the Data Plane `cpdpproxy` service URL (for example, `http://cpdpproxy.<dp-namespace>.svc.cluster.local`) and verify that DNS resolution and network reachability work from the Control Plane. Do not enter the ALB DNS name, application wildcard domain, or Gateway host in this field. Do not assume that `*.svc.cluster.local` resolves across separate EKS clusters.
+The 1.22 registration form (text unchanged from 1.21) supports connectivity and route-resource settings per Data Plane. Hybrid connectivity is enabled by default. If you disable it, enter **Reachable DP URL** as the Data Plane `cpdpproxy` service URL (for example, `http://cpdpproxy.<dp-namespace>.svc.cluster.local`) and verify that DNS resolution and network reachability work from the Control Plane. Do not enter the ALB DNS name, application wildcard domain, or Gateway host in this field. Do not assume that `*.svc.cluster.local` resolves across separate EKS clusters.
 
-The route resource is separate from the hybrid tunnel. The 1.21 guide lists NGINX, Traefik, HAProxy, and OpenShift Router as ingress controller types, plus Gateway API controller options. AWS ALB is not listed as an ingress-controller type; do not assume that entering the `alb` ingress class alone makes it a supported Data Plane registration route resource. This does not limit capability-level Gateway API provisioning: when a capability supports Gateway API endpoint exposure, choose Gateway API and select **Other** for an unlisted controller that implements Kubernetes Gateway API, then provide its actual `GatewayClass` and requested Gateway details. This is intended to cover compatible third-party implementations across vendors. Confirm CRDs, GatewayClass readiness, and capability-specific controller requirements first.
+The route resource is separate from the hybrid tunnel. The 1.22 guide lists NGINX, Traefik, HAProxy, and OpenShift Router as ingress controller types, plus Gateway API controller options. AWS ALB is not listed as an ingress-controller type; do not assume that entering the `alb` ingress class alone makes it a supported Data Plane registration route resource. This does not limit capability-level Gateway API provisioning: when a capability supports Gateway API endpoint exposure, choose Gateway API and select **Other** for an unlisted controller that implements Kubernetes Gateway API, then provide its actual `GatewayClass` and requested Gateway details. This is intended to cover compatible third-party implementations across vendors. Confirm CRDs, GatewayClass readiness, and capability-specific controller requirements first.
 
-The form also includes optional HTTP/HTTPS proxy and `NO_PROXY` settings, custom certificate trust, Fluent Bit service-log processing, container registry authentication, and Helm chart repository selection. Fluent Bit is enabled by default and cannot be changed through registration after the Data Plane is created. For custom registry Secret authentication, create the Secret in all applicable Data Plane namespaces before generating commands. See the [official 1.21 registration guide](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm) and the [EKS 1.21 quick reference](v1.21/QUICK-REFERENCE).
+The form also includes optional HTTP/HTTPS proxy and `NO_PROXY` settings, custom certificate trust, Fluent Bit service-log processing, container registry authentication, and Helm chart repository selection. Fluent Bit is enabled by default and cannot be changed through registration after the Data Plane is created. For custom registry Secret authentication, create the Secret in all applicable Data Plane namespaces before generating commands. See the [official 1.22 registration guide](https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/UserGuide/registering-an-existing-kubernetes-cluster.htm) and the [EKS 1.22 quick reference](v1.22/QUICK-REFERENCE).
 
 **Capability-level Gateway API:** this is configured separately while provisioning a capability, not by the Data Plane's registration route-resource choice. For a capability that supports Gateway API endpoint exposure, select Gateway API and choose **Other** when the controller is not listed. Enter its actual `GatewayClass` and requested Gateway details. This option covers compatible Kubernetes Gateway API implementations across vendors, including Azure Application Gateway for Containers (AGC). Verify CRDs, `GatewayClass` readiness, and capability-specific feature requirements before provisioning.
 
@@ -732,7 +732,7 @@ This value is needed to configure the OpenTelemetry endpoint in Nginx (Part 6) a
 
 Delete the Data Plane from the TIBCO Control Plane UI first to allow the CP to clean up its agent resources:
 
-[Steps to delete Data Plane](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
+[Steps to delete Data Plane](https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm#UserGuide/deleting-data-planes.htm)
 
 Then run the clean-up script:
 
@@ -751,7 +751,7 @@ export TP_DELETE_CLUSTER=false
 
 ## Additional Resources
 
-- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm)
+- [TIBCO Platform Documentation](https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm)
 - [tp-helm-charts EKS Workshop](https://github.com/TIBCOSoftware/tp-helm-charts/tree/main/docs/workshop/eks)
 - [CP + DP Combined Setup Guide](how-to-cp-and-dp-eks-setup-guide)
 - [Observability Guide](how-to-dp-eks-observability)

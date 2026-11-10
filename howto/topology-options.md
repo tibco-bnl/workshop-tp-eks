@@ -552,6 +552,8 @@ Each cloud-native Data Plane can host the following capabilities:
 ## Related Guides
 
 - [CP and DP Setup Guide (EKS)](./how-to-cp-and-dp-eks-setup-guide) — base EKS cluster and platform setup
+- [1.22.0 Quick Reference](./v1.22/QUICK-REFERENCE) — current upgrade sequence, chart versions, and known issues
+- [Release Notes v1.22.0](../releases/v1.22.0) — component versions, removed features, and known issues
 - [1.20.0 EKS Overlay Guide](./v1.20/how-to-cp-and-dp-eks-setup-guide) — 1.20.0-specific changes and upgrade checklist
 - [1.20.0 Quick Reference](./v1.20/QUICK-REFERENCE) — essential commands and chart versions
 - [Release Notes v1.20.0](../releases/v1.20.0) — component versions and known issues

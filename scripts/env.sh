@@ -156,7 +156,7 @@ export TP_STORAGE_CLASS="ebs-gp3"           # EBS gp3 storage class name (for EM
 # TIBCO Platform images are hosted on JFrog Artifactory.
 # The registry URL varies by region — use the edge node closest to your cluster.
 # Credentials are provided by TIBCO as part of your platform subscription.
-# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/pushing-images-to-registry.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm#UserGuide/pushing-images-to-registry.htm
 #
 # Common JFrog edge node URLs by region:
 #   us-west-2:  csgprduswrepoedge.jfrog.io
@@ -176,7 +176,7 @@ export TP_CONTAINER_REGISTRY_PASSWORD=""                        # JFrog password
 # - Max 5 alphanumeric characters
 # - Used as namespace prefix: ${CP_INSTANCE_ID}-ns
 # - Used as service account name: ${CP_INSTANCE_ID}-sa
-# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
 
 export CP_INSTANCE_ID="cp1"                  # Unique ID for this CP installation (max 5 alphanumeric chars)
 
@@ -271,7 +271,7 @@ export CP_RESOURCE_PREFIX="platform"         # Prefix for AWS resources created 
 # If you are using the Elastic Stack installed in this workshop, set the endpoint
 # to the Elasticsearch internal service URL after the stack is deployed.
 # Leave empty to disable log forwarding (logging is optional).
-# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#UserGuide/observability.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm#UserGuide/observability.htm
 
 export TP_LOGSERVER_ENDPOINT=""              # Log server endpoint (e.g., Elasticsearch URL)
 export TP_LOGSERVER_INDEX=""                 # Log index name in the log server
@@ -395,7 +395,7 @@ export TP_SENDGRID_API_KEY=""                 # SendGrid API key
 # The initial admin user is created during the first CP deployment.
 # This account is the bootstrap administrator — subsequent users are managed
 # through the CP UI.
-# Reference: https://docs.tibco.com/pub/platform-cp/1.21.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
+# Reference: https://docs.tibco.com/pub/platform-cp/1.22.0/doc/html/Default.htm#Installation/deploying-control-plane-in-kubernetes.htm
 
 export TP_ADMIN_EMAIL=""                      # Admin user email address (used as login username)
 export TP_ADMIN_FIRSTNAME=""                  # Admin user first name
